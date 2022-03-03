@@ -275,15 +275,24 @@ class Activation:
     self.vgprActivationPool = ActivationRegisterPool(checkOutVgpr, checkInVgpr)
     self.vcc = vcc
     self.usePK = True
-    self.tanhInitAlpha = False
+    self.saturateI8 = False
   # Public function
   def deinit(self):
+    self.inst = inst
+    self.addGprPrefix = False
+    self.gprInlineAsmMode = False
+    self.gprIsTempGpr = False
+
     self.sgprActivationPool.unregisterAll()
     self.vgprActivationPool.unregisterAll()
-    self.tanhInitAlpha = False
+    self.usePK = True
+    self.saturateI8 = False
   # Public function. If true, generated code will add "ValuC+" before the given working v(s)gpr index.
   def setAddGprPrefix(self, value):
     self.addGprPrefix = value
+  # Public function. If set, the activation output will automatically clipped.
+  def setSaturationForInt8(self, sat):
+    self.saturateI8 = sat
   # Public function
   def generateAssembly(self, cDataType, activationType, vgprIdx):
     kStr = ""
@@ -378,7 +387,13 @@ class Activation:
     elif cDataType.isInt32():
       vgprtemp, vgprPInit = self.vgprActivationPool.registerTemp(1, "vgprtmp_absi32")
       kStr += self.inst("v_sub_i32", vgpr(vgprtemp), 0, self.getVgprStr(vgprIdx), "x2 = -x")
-      kStr += self.inst("v_max_i32", self.getVgprStr(vgprIdx), vgpr(vgprtemp), self.getVgprStr(vgprIdx), "y = max(x, x2)")
+      if self.saturateI8:
+        vgprUpper, vgprUpperInitStr = self.getRegAndInitAssembly('v', False, 1, hex(127), hex(127), "127")
+        kStr += vgprUpperInitStr
+        kStr += inst("v_med3_i32", self.getVgprStr(vgprIdx), self.getVgprStr(vgprIdx), vgpr(vgprtemp), vgpr(vgprUpper), "y = min(127, max(x, x2))" )
+      else:
+        kStr += self.inst("v_max_i32", self.getVgprStr(vgprIdx), vgpr(vgprtemp), self.getVgprStr(vgprIdx), "y = max(x, x2)")
+      self.vgprActivationPool.unregisterTemp(vgprtemp)
     else:
       raise RuntimeError("Unsupported data type %s."%cDataType.toDevice("HIP"))
     return kStr
@@ -551,7 +566,12 @@ class Activation:
     elif cDataType.isDouble():
       kStr += self.inst("v_max_f64", self.getVgprStr(vgprIdx, 2), self.getVgprStr(vgprIdx, 2), 0, "x = max(0, x)" )
     elif cDataType.isInt32():
-      kStr += self.inst("v_max_i32", self.getVgprStr(vgprIdx), self.getVgprStr(vgprIdx), 0, "x = max(0, x)" )
+      if self.saturateI8:
+        vgprUpper, vgprUpperInitStr = self.getRegAndInitAssembly('v', False, 1, hex(127), hex(127), "127")
+        kStr += vgprUpperInitStr
+        kStr += self.inst("v_med3_i32", self.getVgprStr(vgprIdx), self.getVgprStr(vgprIdx), 0, vgpr(vgprUpper), "x = min(127, max(0, x))" )
+      else:
+        kStr += self.inst("v_max_i32", self.getVgprStr(vgprIdx), self.getVgprStr(vgprIdx), 0, "x = max(0, x)" )
     else:
       raise RuntimeError("Unsupported data type %s."%cDataType.toDevice("HIP"))
     return kStr

@@ -10984,11 +10984,12 @@ class KernelWriterAssembly(KernelWriter):
           if kernel["StoreRemapVectorWidth"]:
             #Indication if this batch is last batch for this column block shape
             self.StoreRemapLastBatch = 1 if (batchIdx+1) % nBatchesPerRow == 0 else 0
-
+          activation.useExternalVgpr(tmpVgpr, numTmpVgpr)
           kStr += self.globalWriteBatch(kernel, activation, self.ss, batchIdx, applyAlpha, beta, edge, atomic, gwvw, atomicW, \
               elementsThisBatch, self.coord0, self.coord1, self.addrD, self.addrC, \
               tmpVgpr, bf16CVTVgpr, \
               elementSgprs, tmpSgpr, codeAccVgprRead, codeMulAlpha, isOptNLL)
+          activation.removeExternalGpr()
           activation.deinit()
         # Delete tmp class
         del getTmpSgprClass

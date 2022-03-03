@@ -227,11 +227,23 @@ def extractLastInst(kStr):
 
 # Internal use
 class ActivationRegisterPool:
-  def __init__(self, checkOut, checkIn) -> None:
+  def __init__(self, type, checkOut, checkIn) -> None:
+    self.type = type
     self.checkOut = checkOut
     self.checkIn = checkIn
     self.dict = dict()
     self.tempDict = dict()
+    self.externalTempDict = dict()
+    self.externalGprStart = ""
+    self.externalRegisterPool = ""
+  def addTempToDict(self, start, size):
+    self.externalGprStart = start
+    self.externalRegisterPool = RegisterPool(size, 'v', defaultPreventOverflow=False)
+    self.externalRegisterPool.add(0, size)
+  def removeTempFromDict(self):
+    self.externalTempDict = dict()
+    self.externalGprStart = ""
+    self.externalRegisterPool = ""
   # Internal use
   def register(self, num, name, comment = ""):
     if name in self.dict:
@@ -241,6 +253,14 @@ class ActivationRegisterPool:
     return self.dict[name], True
   # Internal use
   def registerTemp(self, num, name, comment = ""):
+    if name in self.externalTempDict:
+      return self.externalTempDict[name], False
+    if self.externalGprStart:
+      alignment = 1 if num == 1 else 2 # For double
+      isExternalAvailable = self.externalRegisterPool.checkOutAligned(num, alignment, comment, -1, True)
+      if isinstance(isExternalAvailable, int):
+        self.externalTempDict[name] = isExternalAvailable
+        return isExternalAvailable + self.externalGprStart, True
     if name in self.tempDict:
       return self.tempDict[name], False
     reg = self.checkOut(num, comment)
@@ -248,12 +268,19 @@ class ActivationRegisterPool:
     return self.tempDict[name], True
   # Internal use
   def unregisterTemp(self, reg):
+    for key, val in list(self.externalTempDict.items()):
+      if (reg == val):
+        self.externalRegisterPool.checkIn(val)
+        del self.externalTempDict[key]
     for key, val in list(self.tempDict.items()):
       if (reg == val):
         self.checkIn(val)
         del self.tempDict[key]
   # Internal use
   def unregisterAllTemp(self):
+    for key, val in list(self.externalTempDict.items()):
+      self.externalRegisterPool.checkIn(val)
+      del self.externalTempDict[key]
     for key, val in list(self.tempDict.items()):
       self.checkIn(val)
       del self.tempDict[key]
@@ -271,8 +298,8 @@ class Activation:
     self.gprInlineAsmMode = False
     self.gprIsTempGpr = False
 
-    self.sgprActivationPool = ActivationRegisterPool(checkOutSgpr, checkInSgpr)
-    self.vgprActivationPool = ActivationRegisterPool(checkOutVgpr, checkInVgpr)
+    self.sgprActivationPool = ActivationRegisterPool('s', checkOutSgpr, checkInSgpr)
+    self.vgprActivationPool = ActivationRegisterPool('v', checkOutVgpr, checkInVgpr)
     self.vcc = vcc
     self.usePK = True
     self.saturateI8 = False
@@ -287,6 +314,13 @@ class Activation:
     self.vgprActivationPool.unregisterAll()
     self.usePK = True
     self.saturateI8 = False
+  def useExternalVgpr(self, start, size):
+    self.vgprActivationPool.addTempToDict(start, size)
+  def useExternalSgpr(self, start, size):
+    self.sgprActivationPool.addTempToDict(start, size)
+  def removeExternalGpr(self):
+    self.sgprActivationPool.removeTempFromDict()
+    self.vgprActivationPool.removeTempFromDict()
   # Public function. If true, generated code will add "ValuC+" before the given working v(s)gpr index.
   def setAddGprPrefix(self, value):
     self.addGprPrefix = value
@@ -313,6 +347,9 @@ class Activation:
       kStr += self.getTanhAssembly(cDataType, 1, vgprIdx, "activationAlpha", "activationBeta")
     elif (activationType == 'gelu'):
       kStr += self.getGeluAssembly(cDataType, vgprIdx)
+
+    self.sgprActivationPool.unregisterAllTemp()
+    self.vgprActivationPool.unregisterAllTemp()
     return kStr
   # Internal use, for generating inline assembly format
   def overWriteInst(self, newInst):

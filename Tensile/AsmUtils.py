@@ -377,10 +377,10 @@ class RegisterPool:
 
   ########################################
   # Check Out
-  def checkOut(self, size, tag="_untagged_", preventOverflow=-1):
-    return self.checkOutAligned(size, 1, tag, preventOverflow)
+  def checkOut(self, size, tag="_untagged_", preventOverflow=-1, returnEmptyIfNotFound=False):
+    return self.checkOutAligned(size, 1, tag, preventOverflow, returnEmptyIfNotFound)
 
-  def checkOutAligned(self, size, alignment, tag="_untagged_aligned_", preventOverflow=-1):
+  def checkOutAligned(self, size, alignment, tag="_untagged_aligned_", preventOverflow=-1, returnEmptyIfNotFound=False):
     if preventOverflow == -1:
       preventOverflow = self.defaultPreventOverflow
     assert(size > 0)
@@ -404,6 +404,9 @@ class RegisterPool:
         break
       else:
         continue
+
+    if returnEmptyIfNotFound and (found == -1):
+      return ""
 
     # success without overflowing
     if found > -1:

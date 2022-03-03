@@ -12140,7 +12140,7 @@ class KernelWriterAssembly(KernelWriter):
                 if kernel["ProblemType"]["HighPrecisionAccumulate"]:
                   assert (gwvw % 4 == 0)
                   if (vi%4) != 3:
-                    tmpC = self.vgprPool.checkOut(1)
+                    tmpC = tmpVgpr
                     kStr += inst("v_bfe_i32", vgpr(tmpC), vgpr(dataV+0), (vi * 8), 8, "int8 to int32")
                   else:
                     tmpC = dataV+0
@@ -12149,8 +12149,6 @@ class KernelWriterAssembly(KernelWriter):
                       "C = C*beta")
                   kStr += inst("_v_add_u32", vgpr("ValuC+%u"%sumIdxV), vgpr(tmpC), vgpr("ValuC+%u"%sumIdxV), \
                       "finalSum = sum*alpha + C*beta")
-                  if (vi%4) != 3:
-                    self.vgprPool.checkIn(tmpC)
               elif kernel["ProblemType"]["DestDataType"].isInt32():
                 # assume we will need to replace v_mac_f32 with v_add_u32 and s_mul_lo_i32
                 # v_mad_i32_i24

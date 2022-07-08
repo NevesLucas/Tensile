@@ -150,12 +150,6 @@ class ProblemType:
         rv.setConstStrideB = []
         if 'SetConstStrideB' in d:
             rv.setConstStrideB = d['SetConstStrideB']
-        rv.zeroPadA=[]
-        if 'ZeroPadA' in d:
-            rv.zeroPadA = d['ZeroPadA']
-        rv.zeroPadB=[]
-        if 'ZeroPadB' in d:
-            rv.zeroPadB = d['ZeroPadB']
 
         rv.mirrorDimsA = d['MirrorDimsA'] if 'MirrorDimsA' in d else []
         rv.mirrorDimsB = d['MirrorDimsB'] if 'MirrorDimsB' in d else []

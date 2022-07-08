@@ -148,24 +148,6 @@ class ProblemType(Mapping):
     ProblemType.assignDerivedParameters(self.state)
 
     for tc in ('A', 'B'):
-      freeDims={}
-      sumDims={}
-      for zp in self["ZeroPad%s"%tc] :
-        (freeDim, sumDim, leading, trailing) = zp
-        if freeDim not in self.state["IndicesFree"]:
-          printExit("ZeroPad%s=%s dim=%u is not a free index"%(tc, zp, freeDim))
-        if freeDim not in self.state["IndexAssignments%s"%tc]:
-          printExit("ZeroPad%s=%s dim=%u is not in IndexAssignments%s"%(tc, zp, freeDim, tc))
-        if sumDim not in self.state["IndicesSummation"]:
-          printExit("ZeroPad%s=%s dim=%u is not a summation index"%(tc, zp, sumDim))
-        if freeDim in freeDims:
-          printExit("ZeroPad%s=%s freeDim=%u occurs in more than one tuple (prev:%s)"%(tc, zp, freeDim,freeDims[freeDim]))
-        freeDims[freeDim] = zp
-        if sumDim in sumDims:
-          printExit("ZeroPad%s=%s sumDim=%u occurs in more than one tuple"%(tc, zp, sumDim))
-        sumDims[sumDim] = zp
-
-    for tc in ('A', 'B'):
       for sc in self["SetConstStride%s"%tc] :
           (anchorDim, stride) = sc[:2]
           if anchorDim not in self.state["IndexAssignments%s"%tc]:
@@ -575,15 +557,13 @@ class ProblemSizeRange:
 
 class Problem:
   """ Problem sizes, strides, padding and other info"""
-  def __init__(self, sizes=None, stridesA=None, stridesB=None, stridesC=None, stridesD=None, zeroPadA=None, zeroPadB=None, count=None):
+  def __init__(self, sizes=None, stridesA=None, stridesB=None, stridesC=None, stridesD=None, count=None):
     self.sizes = tuple(sizes) if sizes else None
     self.stridesA = tuple(stridesA) if stridesA else None
     self.stridesB = tuple(stridesB) if stridesB else None
     self.stridesC = tuple(stridesC) if stridesC else None
     self.stridesD = tuple(stridesD) if stridesD else None
 
-    self.zeroPadA = zeroPadA
-    self.zeroPadB = zeroPadB
     self.count = count
 
   def __str__(self):
@@ -616,7 +596,7 @@ class ExactList(Problem):
           % (e, problemType, problemType["TotalIndices"]) )
 
     # TODO- pass strides here, remove calls to convertLeadingDims
-    Problem.__init__(self, sizes=sizes, zeroPadA=problemType["ZeroPadA"], zeroPadB=problemType["ZeroPadB"])
+    Problem.__init__(self, sizes=sizes)
 
   def __str__(self):
     return str(list(self.sizes))
@@ -639,9 +619,7 @@ class ExactList(Problem):
 
 
 class ExactDict(Problem):
-  # padStartA is list of pad starts for A dimension in order of ZeroPadA list.
-  # padEndA is list of pad ends for A dimension in order of ZeroPadA list.
-  AllowedFields = [ 'count', 'sizes', 'stridesA', 'stridesB', 'stridesC', 'stridesD', 'padStartA', 'padEndA', 'padStartB', 'padEndB']
+  AllowedFields = [ 'count', 'sizes', 'stridesA', 'stridesB', 'stridesC', 'stridesD' ]
 
   def __init__(self, e, problemType):
     Problem.__init__(self)
@@ -656,33 +634,6 @@ class ExactDict(Problem):
       if "OperationType" in problemType and problemType["OperationType"] == "GEMM":
         sizesTuple = tuple(self.sizes + [-1, -1, -1, -1])
         self.sizes = ExactList.convertLeadingDims(problemType, sizesTuple, self.stridesA, self.stridesB, self.stridesC, self.stridesD)
-      zp={}
-      zp['A'] = deepcopy(problemType["ZeroPadA"])
-      zp['B'] = deepcopy(problemType["ZeroPadB"])
-
-      for (tc, padName, zpField) in (
-          ("A", "padStartA",2), ("A", "padEndA", 3),
-          ("B", "padStartB",2), ("B", "padEndB", 3) ):
-          try:
-            problemPad = getattr(self, padName)
-            if len(problemPad) != len (zp[tc]):
-                raise RuntimeError ("problem-specified %s==%s does not match length of problem-type pad==%s." % (padName, problemPad, zp[tc]))
-            for (i,p) in enumerate(problemPad):
-              if not (zp[tc][i][zpField] == -1 or zp[tc][i][zpField] == p):
-                raise RuntimeError ("problem-specified %s==%d does not match problem-type==%d." % (padName, p, zp[tc][i][zpField]))
-              zp[tc][i][zpField] = p
-          except AttributeError:
-            None
-
-      for (tc) in ("A", "B"):
-        for p in zp[tc]:
-          if p[2] == -1 or p[3]==-1:
-            raise RuntimeError ("padStart/padEnd for %s must be specified in problem-type or problem - can't be left -1/TBD" % zp[tc])
-
-      self.zeroPadA = zp['A']
-      self.zeroPadB = zp['B']
-    else:
-      self.zeroPadA = self.zeroPadB = []
 
     if problemType:
       if "OperationType" in problemType and problemType["OperationType"] == "GEMM":
@@ -753,9 +704,6 @@ class ProblemSizes:
           [ExactList.convertLeadingDims(self.problemType, problemSize) for problemSize in self.ranges[i].problemSizes]
 
     self.problems = OrderedDict()
-    for sizeRange in self.ranges:
-        for rangeSize in sizeRange.problemSizes:
-            self.problems.update({Problem(rangeSize, zeroPadA=problemType["ZeroPadA"]) : 1 })
     for e in self.exacts:
         self.problems.update({e : 1})
     if globalParameters["SortProblems"]:
@@ -2398,8 +2346,7 @@ class Solution(collections.abc.Mapping):
 
     assert(state["DepthU"]> 0)
 
-    if state["UnrollIncIsDepthU"] or state["PackSummationDims"] == 1 \
-       or bool(problemType["ZeroPadA"]) or bool(problemType["ZeroPadB"]):
+    if state["UnrollIncIsDepthU"] or state["PackSummationDims"] == 1:
         # unrollIncIsDepthU does not support tail loop, so add asem requirement to reject
         # problems that require tail loop.
         if state["DepthU"] % state["AssertSummationElementMultiple"] != 0:
@@ -3213,24 +3160,6 @@ class Solution(collections.abc.Mapping):
         state["_VectorStore"] = 0
       else:
         reject(state, "UseInitialStridesCD requires not VectorStore since store locations not adjacent")
-
-    # Not currently suppored.  Support would require some changes in the
-    # zeroPadRegs management:
-    #   - don't allocate VGPRs for multiple perp/pad cases
-    #   - guardZeroPad needs to add soffset to scalar calc
-    if problemType["ZeroPadA"] or problemType["ZeroPadB"]:
-      state["_UseSgprForGRO"] = 0
-
-    # current requirement to avoid buffer loads that span multiple entries
-    # if the summation dim participating in the ZeroPad is not fast-moving then
-    # likely have more performant options.
-    for tc in ('A', 'B'):
-      if problemType["ZeroPad%s"%tc] and state["KernelLanguage"] == "Assembly":
-        if state["GlobalLoadVectorWidth%s"%tc] != 1 \
-            and problemType["IndexAssignments%s"%tc][0] in problemType["ZeroPad%s"%tc][0][0:1]:
-          reject(state, "asm ZeroPad requires GlobalLoadVectorWidth==1")
-        if not bufferLoad:
-          reject(state, "asm ZeroPad requires BufferLoad")
 
     state["AssignedDerivedParameters"] = True
 

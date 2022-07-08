@@ -37,24 +37,6 @@ import os
 import shlex
 from enum import Enum
 
-class ZeroPadReg:
-  class State(Enum):
-    Allocated=0
-    MacroDef=1
-    CalculatedAddr=2
-  def __init__(self, zp, regName, vgprIdx, perp, sPerp, para, sPara):
-    self.zp = zp
-    self.state = ZeroPadReg.State.Allocated
-    self.regName = regName
-    self.vgprIdx= vgprIdx
-    self.perp = perp
-    self.sPerp = sPerp
-    self.para = para
-    self.sPara = sPara
-
-  def isMatch(self, perp, sPerp, para, sPara):
-    return self.perp==perp and self.sPerp==sPerp and self.para==para and self.sPara==sPara
-
 class PreLoopVmcntCase(Enum):
   Undefined = 0
   Basic_Load = 1
@@ -558,15 +540,6 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["PackSummationDims"] and kernel["GlobalSplitU"]>1:
       self.defineSgpr("GsuNumIter%s"%self.loopChar(kernel,self.unrollIdx), 1)
 
-    for tc in ('A', 'B'):
-      for zp in kernel["ProblemType"]["ZeroPad%s"%tc]:
-        (freeDim, sumDim, padStart, padEnd) = zp
-        sumDimChar  = globalParameters["IndexChars"][sumDim]
-        # These will eventually be read as kernel args:
-        self.defineSgpr("ElementEdge%s%s"%(tc, sumDimChar),1)
-        if kernel["PackSummationDims"]:
-          self.defineSgpr("Iter%s"%(sumDimChar),1)
-
     if kernel["FractionalLoad"] == 2:
       if kernel["fractionalPerpOverhangA"]:
         self.defineSgpr("PerpOverhangVccA", 2, 2)
@@ -638,7 +611,6 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   def initKernel(self, kernel, tPA, tPB ):
     super(KernelWriterAssembly, self).initKernel(kernel, tPA, tPB)
-    problemType = kernel["ProblemType"]
 
     dkp = kernel["DisableKernelPieces"]
     self.do["NullKernel"]  = dkp >= 9 or dkp == -9
@@ -671,10 +643,7 @@ class KernelWriterAssembly(KernelWriter):
     # groOffsetInMacroTile doesn't work with packed dims since these need to set SRD to the tensor base
     # then extract the packed dimensions from the flattened index (including the workgroup) and scale by strides
     # - the index is per-work-item so can't put work-group into the SRD
-    # ZeroPad requires groOffsetInMacroTile since it needs the gro offsets in each dimension to include
-    # the tile components, since those same vars are used to compute the ZP offsets used for edge comparisons.
-    if problemType["ZeroPadA"] == [] and problemType["ZeroPadB"] == [] and \
-       len(kernel["PackedC0IndicesX"])==1 and len(kernel["PackedC1IndicesX"])==1 and kernel["BufferLoad"]:
+    if len(kernel["PackedC0IndicesX"])==1 and len(kernel["PackedC1IndicesX"])==1 and kernel["BufferLoad"]:
       self.groOffsetInMacroTile = 1
     else:
       self.groOffsetInMacroTile = 0
@@ -1419,26 +1388,6 @@ class KernelWriterAssembly(KernelWriter):
       self.startVgprGlobalReadAddressesB = vgprIdx
       vgprIdx += numVgprGlobalReadAddressesB
 
-    self.zeroPadRegs={}
-    self.zeroPadRegs['A'] = collections.OrderedDict()
-    self.zeroPadRegs['B'] = collections.OrderedDict()
-    for (tc,tP) in (('A',self.tPA),('B',self.tPB)):
-      for perp in range(0, tP["nrp"]):
-        for sPerp in range(0, tP["nrpv"]):
-          for para in range(0, tP["nrc"]):
-            for sPara in range(0, tP["nrcv"]//tP["nrcvpi"]):
-              for zp in kernel["ProblemType"]["ZeroPad%s"%tc]:
-                (freeDim, sumDim) = zp[:2]
-                freeDimChar = globalParameters["IndexChars"][freeDim]
-                sumDimChar  = globalParameters["IndexChars"][sumDim]
-                zpName = "GlobalReadOffset%s_ZP%s%s_%d_%d_%d_%d" % \
-                          (tc, freeDimChar, sumDimChar, para, sPara, perp, sPerp)
-
-                assert (zpName not in self.zeroPadRegs[tc])
-                self.zeroPadRegs[tc][zpName] = ZeroPadReg(zp, zpName, vgprIdx, \
-                                                        perp, sPerp, para, sPara)
-                vgprIdx += 1
-
     self.startVgprGlobalReadIncsA = vgprIdx
     vgprIdx += numVgprGlobalReadIncsA
     self.startVgprGlobalReadIncsB = vgprIdx
@@ -1720,16 +1669,6 @@ class KernelWriterAssembly(KernelWriter):
     for idxChar in kernel["PackedC1IdxChars"][:-1]:
       self.defineSgpr("MagicNumberSize%s"%idxChar, 1)
       self.defineSgpr("MagicShiftSize%s"%idxChar, 1)
-    for idx in kernel["ProblemType"]["IndicesSummation"]:
-      for tc in ('A','B'):
-        for zp in kernel["ProblemType"]["ZeroPad%s"%tc]:
-          (freeDim, sumDim, padStart, padEnd) = zp
-          if sumDim == idx:
-            freeDimChar = globalParameters["IndexChars"][freeDim]
-            sumDimChar  = globalParameters["IndexChars"][sumDim]
-            # These will eventually be read as kernel args:
-            self.defineSgpr("PadStart%s%s%s"%(tc, freeDimChar, sumDimChar),1)
-            self.defineSgpr("PadEnd%s%s%s"%(tc, freeDimChar, sumDimChar),1)
     self.defineSgpr("OrigStaggerUIter", 1)  # Original stagger register.  Only needed for Persistent
     self.defineSgpr("NumWorkGroups0", 1)
     self.defineSgpr("NumWorkGroups1", 1)
@@ -1795,7 +1734,7 @@ class KernelWriterAssembly(KernelWriter):
       (numSgprBeta if kernel["ProblemType"]["UseBeta"] else 0) + self.numSgprStridesD + self.numSgprStridesC + self.numSgprStridesA + \
       self.numSgprStridesB + self.numSgprSizesFree + self.numSgprSizesSum + \
       len(self.sumMagicParms)*2 + len(kernel["PackedC0IdxChars"][:-1])*2 + \
-      len(kernel["PackedC1IdxChars"][:-1])*2 + len(kernel["ProblemType"]["ZeroPadA"])*2 + len(kernel["ProblemType"]["ZeroPadB"])*2 + \
+      len(kernel["PackedC1IdxChars"][:-1])*2 + \
       1 + \
       2 + \
       pkArgumentToLoad + \
@@ -2368,10 +2307,6 @@ class KernelWriterAssembly(KernelWriter):
       kStr += self.macroRegister("vgprGlobalReadAddrB", \
           self.startVgprGlobalReadAddressesB)
 
-    for tc in ('A','B'):
-      for zpr in self.zeroPadRegs[tc].values():
-        kStr += self.macroRegister("vgpr" + zpr.regName, zpr.vgprIdx)
-        self.zpr = ZeroPadReg.State.MacroDef
     if self.globalReadIncsUseVgpr:
       kStr += self.macroRegister("vgprGlobalReadIncsA", \
           self.startVgprGlobalReadIncsA)
@@ -3103,20 +3038,6 @@ class KernelWriterAssembly(KernelWriter):
 
       # Jump here if alpha is non-zero
       kStr += "%s:%s" % (endCheckLabel, self.endLine)
-
-    for tc in ('A', 'B'):
-      for zp in kernel["ProblemType"]["ZeroPad%s"%tc]:
-        (freeDim, sumDim) = zp[:2]
-        freeDimChar = globalParameters["IndexChars"][freeDim]
-        sumDimChar  = globalParameters["IndexChars"][sumDim]
-        kStr += inst("s_lshl_b32", \
-                     sgpr("PadStart%s%s%s"%(tc, freeDimChar, sumDimChar)), \
-                     sgpr("PadStart%s%s%s"%(tc, freeDimChar, sumDimChar)), \
-                     "Bpe%sLog2"%tc, "")
-        kStr += inst("s_lshl_b32", \
-                     sgpr("PadEnd%s%s%s"%(tc, freeDimChar, sumDimChar)), \
-                     sgpr("PadEnd%s%s%s"%(tc, freeDimChar, sumDimChar)), \
-                     "Bpe%sLog2"%tc, "")
 
     if kernel["PersistentKernel"]:
       kStr += inst("s_mov_b32", sgpr("SerialWorkGroupIter"), sgpr("WorkGroup0"), "init SerialWorkGroupIter")
@@ -4010,10 +3931,6 @@ class KernelWriterAssembly(KernelWriter):
     #if tP["isB"]:
     #  kStr += self.bomb(0x100)
 
-    # ensure we computed all the required addresses above
-    for zpr in self.zeroPadRegs[tc].values():
-      assert(zpr.state == ZeroPadReg.State.CalculatedAddr)
-
     return "" if self.dontAppendCode else kStr
 
   ##############################################################################
@@ -4264,7 +4181,6 @@ class KernelWriterAssembly(KernelWriter):
 
     stmp = self.getTmpSgpr(2+2+1).idx()
     tileStart = stmp+2
-    prePadSgpr = stmp+4
     wroteTileStart = False
     #---
     # Compute tileStart #elements from the 2D array start
@@ -4311,23 +4227,7 @@ class KernelWriterAssembly(KernelWriter):
 
     #---
     # Compute BUFFER Limit:
-    prePad = prePadConst = self.srdShiftLeft[tc] * tP["bpe"] # leave room in case we have to pointer shift
-    # subtract the zeropad(s) from the SRD base
-    # this causes small offsets (<pad) to result in large negative offsets and thus report as OOB
-    for i,zp in enumerate(kernel["ProblemType"]["ZeroPad%s"%tc]):
-      (freeDim,sumDim) = zp[:2]
-      freeDimChar = globalParameters["IndexChars"][freeDim]
-      sumDimChar  = globalParameters["IndexChars"][sumDim]
-      # override the const pre-pad with an SGPR based on the leading/trailing items:
-      prePad = sgpr(prePadSgpr)
-      if i==0:
-        kStr += inst("s_add_u32", prePad, \
-                 sgpr("PadStart%s%s%s"%(tc, freeDimChar,sumDimChar)), \
-                 prePadConst, "prePadSgpr = PadStart + ptr-shift-pad")
-      else:
-        kStr += inst("s_add_u32", prePad, \
-                 prePad, sgpr("PadStart%s%s%s"%(tc,freeDimChar, sumDimChar)), \
-                 "prepadSgpr += PadStart")
+    prePad = self.srdShiftLeft[tc] * tP["bpe"] # leave room in case we have to pointer shift
 
     if not wroteTileStart:
       kStr += inst("s_mov_b32", sgpr(tileStart+0), 0, "set default tileStart")
@@ -5632,59 +5532,6 @@ class KernelWriterAssembly(KernelWriter):
       kStr += inst("s_mov_b32", loopCounter, \
                 sgpr("SizesSum+%u"%loopIdx), \
                 "init loop counter")
-
-    if not tailLoop:
-      # compute element edge:
-      problemType = kernel["ProblemType"]
-      zpB = next((zpi for zpi in problemType["ZeroPadB"] if zpi[1] == loopDim), None)
-      assert zpB==None # not supported
-
-      zpA = next((zpi for zpi in problemType["ZeroPadA"] if zpi[1] == loopDim), None)
-      if zpA:
-        tc = 'A'
-        (freeDim,sumDim) = zpA[:2]
-        freeDimChar = globalParameters["IndexChars"][freeDim]
-        sumDimChar  = globalParameters["IndexChars"][sumDim]
-        elementEdge = "ElementEdge%s%s" % (tc,sumDimChar)
-        tmpSgpr = self.getTmpSgpr(1).idx()
-        kStr += "\n"
-        kStr += self.comment1("ElementEdge%s%s" % (tc, sumDimChar))
-        kStr += inst("s_mul_i32", sgpr(elementEdge), \
-                  self.strideRef('A', freeDim), \
-                  self.sizeRef(freeDim), \
-                  "strideFree*sizeFree")
-
-        kStr += inst("s_sub_u32", sgpr(tmpSgpr), \
-                   self.sizeRef(sumDim), 1, \
-                   "strideSum*(sizeSum-1), step1")
-        kStr += inst("s_mul_i32", sgpr(tmpSgpr), \
-                  self.strideRef('A', sumDim), \
-                  sgpr(tmpSgpr),\
-                   "strideSum*(sizeSum-1), step2")
-
-        kStr += inst("s_add_u32", sgpr(elementEdge), \
-                  sgpr(elementEdge), \
-                  sgpr(tmpSgpr), \
-                   "strideFree*sizeFree + strideSum*(sizeSum-1)")
-
-        kStr += inst("s_lshl_b32", \
-                  sgpr("ElementEdge%s%s"%(tc, sumDimChar)), \
-                  sgpr("ElementEdge%s%s"%(tc, sumDimChar)), \
-                  "Bpe%sLog2"%tc, "scale by bpe")
-
-        kStr += inst("s_sub_u32", sgpr(elementEdge), \
-                  sgpr(elementEdge), \
-                  sgpr("PadStart%s%s%s"%(tc, freeDimChar, sumDimChar)), \
-                  "sub PadStart*Bpe")
-        kStr += inst("s_sub_u32", sgpr(elementEdge), \
-                  sgpr(elementEdge), \
-                  sgpr("PadEnd%s%s%s"%(tc, freeDimChar, sumDimChar)), \
-                  "Final0: (strideFree*sizeFree - strideSum*(sizeSum-1))*BPE - padStart - padEnd")
-
-        if kernel["PackSummationDims"]:
-          kStr += inst("s_mov_b32", sgpr("Iter"+sumDimChar), 0, "init iterX")
-
-        #assert(self.groOffsetInMacroTile==0)
 
     return kStr
 
@@ -7009,12 +6856,6 @@ class KernelWriterAssembly(KernelWriter):
         else:
           iterX=sgpr(tmpSgpr+0)
 
-
-        for tc in ('A','B'):
-          zp = next((zpi for zpi in problemType["ZeroPad"+tc] if zpi[1] == sumDim), None)
-          if zp:
-            incCodeA.addInst("s_mov_b32", sgpr("Iter"+sumChar), iterX, "save iterX")
-
         # update psdOffset. Inputs:
         #   - tmpSgpr+0== packedBits, and must be preserved for next iteration
         #   - iterX, number of iterations for this dim.  Used in A/B increment loop below
@@ -7141,9 +6982,7 @@ class KernelWriterAssembly(KernelWriter):
 
     directToLdsLoads = 0
     prevLdsOffset    = 0
-    # print("tc={}, nrp={}, nrpv={}, nrc={}, nrcv/nrcvpi={}, zeroPad={}, sgprforGRO={}".format(tc, tP["nrp"], tP["nrpv"], tP["nrc"], tP["nrcv"]//tP["nrcvpi"], problemType["ZeroPad%s"%tc], kernel["UseSgprForGRO"]))
-    if problemType["ZeroPad%s"%tc]:
-      addrV = self.vgprPool.checkOut(1,"addrV")
+    # print("tc={}, nrp={}, nrpv={}, nrc={}, nrcv/nrcvpi={}, sgprforGRO={}".format(tc, tP["nrp"], tP["nrpv"], tP["nrc"], tP["nrcv"]//tP["nrcvpi"], problemType["ZeroPad%s"%tc], kernel["UseSgprForGRO"]))
 
     instOffset = 0
     loopCnt = -1
@@ -7236,11 +7075,6 @@ class KernelWriterAssembly(KernelWriter):
                 # Sgpr for GRO
                 else:
                   soffset = "0" if graIdx == 0 else sgpr("ScalarGlobalReadOffset%s+%u"%(tc, graIdx-1))
-
-                if problemType["ZeroPad%s"%tc] and not (kernel["DirectToLds%s"%tc] and kernel["UseInstOffsetForGRO"]):
-                  codeMod = Code.Module("guardZeroPad%u"%loopCnt)
-                  offsetVgpr = self.guardZeroPad(kernel, tP, codeMod, offsetVgpr, soffset, tmpSgpr, addrV, perp, sPerp, para, sPara)
-                  kStr += str(codeMod)
 
                 unrollMirrorWithSoffset = kernel["ProblemType"]["IndicesSummation"][self.unrollIdx] in problemType["MirrorDims%s"%tc] and soffset != "0"
                 # ScalarGlobalReadOffset should be negative value with unroll mirroring.
@@ -7445,9 +7279,6 @@ class KernelWriterAssembly(KernelWriter):
         kStr += "s_barrier // debug\n"
         #kStr += self.assert_lt(vgpr("Serial"), 64) # examine second wavefront
 
-    if problemType["ZeroPad%s"%tc]:
-      self.vgprPool.checkIn(addrV)
-
     # TODO - can remove one of these m0 restores if A and B both TLU
     if kernel["DirectToLds%s"%tP["tensorChar"]]:
       kStr += inst("s_mov_b32", "m0", \
@@ -7460,61 +7291,6 @@ class KernelWriterAssembly(KernelWriter):
       self.vgprPool.checkIn(zeroVgpr)
 
     return kStr
-
-  ##############################################################################
-  # guardZeroPad
-  # add to code module the code to guard subsequent load
-  # Inputs:
-  #  - offsetVgpr contains GlobalReadOffset
-  # Outputs:
-  #  - addrV is temp vgpr, returns the guarded address (OOB lanes return -1)
-  ##############################################################################
-  def guardZeroPad(self, kernel, tP, codeMod, offsetVgpr, soffset, tmpSgpr, addrV, perp, sPerp, para, sPara):
-    tc = tP["tensorChar"]
-    zps = [zpr for zpr in self.zeroPadRegs[tc].values() if zpr.isMatch(perp, sPerp, para, sPara)]
-    for i, zpr in enumerate(zps):
-      #zpTmp = tmpSgpr + i + 1
-      (freeDim,sumDim) = zpr.zp[:2]
-      sumChar = self.indexChars[sumDim]
-
-      codeMod.addComment1("guardZeroPad: "+zpr.regName)
-      iterX = "Iter"+sumChar if kernel["PackSummationDims"] else tmpSgpr
-      if not kernel["PackSummationDims"]:
-        codeMod.addInst("s_sub_u32", sgpr(tmpSgpr), sgpr("Size%s"%sumChar) , sgpr("LoopCounter%s"%sumChar),
-                          "loop = Size - remaining loop counter")
-      codeMod.addInst("s_mul_i32", sgpr(tmpSgpr), sgpr(iterX), \
-                        self.strideRef(tc,sumDim), "LoopCounterZp*strideSum")
-      codeMod.addInst("s_lshl_b32", sgpr(tmpSgpr), sgpr(tmpSgpr), \
-                        "Bpe%sLog2"%tc, "")
-      if soffset != "0":
-        assert (soffset == "0") # need to add to scalar above.  Can't happen with UseSgprForGRO=0
-        codeMod.addInst("s_add_u32", sgpr(tmpSgpr), sgpr(tmpSgpr), soffset, "add soffset ")
-
-      if sumDim in kernel["ProblemType"]["MirrorDims%s"%tc]:
-        codeMod.addInst("_v_sub_u32", vgpr(addrV), vgpr(zpr.regName), sgpr(tmpSgpr), \
-                        "<- GRO - scaled elementCounter")
-      else:
-        codeMod.addInst("_v_add_u32", vgpr(addrV), vgpr(zpr.regName), sgpr(tmpSgpr), \
-                        "<- GRO + scaled elementCounter")
-
-      cmpDest = self.vcc if i==0 else sgpr(tmpSgpr,self.laneSGPRCount) # first one writes vcc
-      codeMod.addInst("v_cmp_ge_u32", cmpDest, vgpr(addrV), \
-                        sgpr("ElementEdge%s%s"%(tc,sumChar)), \
-                        "loopCounter*strideSum >= ElementEdge ?")
-
-      if i>0:
-        codeMod.addInst("s_or_b{}".format(self.kernel["WavefrontSize"]), self.vcc, self.vcc, sgpr(tmpSgpr,self.laneSGPRCount),"combine elementEdge masks")
-
-      if i==len(zps)-1:
-        codeMod.addInst("v_cndmask_b32", vgpr(addrV), vgpr(offsetVgpr), -1, self.vcc, \
-                          "Set addresses in pad to large OOB value")
-
-      #if soffset != "0":
-      #  assert(sumChar == self.unrollChar) # don't think we need this for non-unroll dims
-      #  #codeMod.addText(self.assert_ne(sgpr("WorkGroup0"),1))
-      #codeMod.addText(self.bomb())
-
-    return addrV
 
   ##############################################################################
   # DirectToLds M0 update: Do It A/B
@@ -7584,28 +7360,6 @@ class KernelWriterAssembly(KernelWriter):
               0,
               "Set limit to 0 for last iteration")
 
-    tmpSgpr = self.getTmpSgpr(2).idx()
-    # TODO - clean up here:
-    # +0,+1 - general purpose tmp. i + 2 is the offset for zero-pad index X
-    #tmpSgpr = self.getTmpSgpr(2+len(problemType["ZeroPad%s"%tc])).idx()
-    #for i, zp in enumerate(problemType["ZeroPad%s"%tc]):
-    #  zpTmp = tmpSgpr + i + 2
-    #  imod.header.addComment1("Zeropad check:")
-    #  (freeDim,sumDim)= zp[:2]
-    #  sumChar = self.indexChars[sumDim]
-    #  loopIdx = problemType["IndicesSummation"].index(sumDim)
-    #  # TODO - fix for GSU, need LOCAL_DEPTHU*GSUp
-    #  if guardK:
-    #    imod.header.addInst("s_sub_u32", sgpr(zpTmp), self.sizeRef(freeDim), \
-    #      self.loopCounter(kernel,loopIdx), "compute elementCounter%s, step2"%(sumChar))
-    #  else:
-    #    imod.header.addInst("s_mul_i32", sgpr(zpTmp), self.loopCounter(kernel,loopIdx), \
-    #      "DepthU", "compute elementCounter%s, step1"%(sumChar))
-    #    imod.header.addInst("s_sub_u32", sgpr(zpTmp), self.sizeRef(freeDim), \
-    #      sgpr(zpTmp), "compute elementCounter%s, step2"%(sumChar))
-    #  imod.header.addInst("s_mul_i32", sgpr(zpTmp), self.strideRef(tc,freeDim), sgpr(zpTmp), "scale by stride")
-    #  imod.header.addInst("s_lshl_b32", sgpr(zpTmp), sgpr(zpTmp), log2(self.bpeAB), "scale by bpe")
-
     # set the first tc for below wait code for DirectToLds
     # if DirectToVgprA is enabled, change the first to B
     tc1st = 'A'
@@ -7640,8 +7394,6 @@ class KernelWriterAssembly(KernelWriter):
     prevLdsOffset    = 0
 
     loopCnt = -1
-    if problemType["ZeroPad%s"%tc]:
-      addrV = self.vgprPool.checkOut(1,"addrV")
     for perp in range(0, tP["nrp"]):
       for sPerp in range(0, tP["nrpv"]):
         for para in range(0, tP["nrc"]):
@@ -7669,11 +7421,6 @@ class KernelWriterAssembly(KernelWriter):
               # Sgpr for GRO
               else:
                 soffset = "0" if graIdx == 0 else sgpr("ScalarGlobalReadOffset%s+%u"%(tc, graIdx-1))
-
-              if problemType["ZeroPad%s"%tc] and not (kernel["DirectToLds%s"%tc] and kernel["UseInstOffsetForGRO"]):
-                codeMod = Code.Module("guardZeroPad%u"%loopCnt)
-                offsetVgpr = self.guardZeroPad(kernel, tP, codeMod, offsetVgpr, soffset, tmpSgpr, addrV, perp, sPerp, para, sPara)
-                loadModule.addCode(codeMod)
 
               unrollMirrorWithSoffset = kernel["ProblemType"]["IndicesSummation"][self.unrollIdx] in problemType["MirrorDims%s"%tc] and soffset != "0"
               # ScalarGlobalReadOffset should be negative value with unroll mirroring.
@@ -7787,9 +7534,6 @@ class KernelWriterAssembly(KernelWriter):
         imod.middle.addInst(inst, dst, src, comment)
       else:
         imod.footer.addInst(inst, dst, src, comment)
-
-    if problemType["ZeroPad%s"%tc]:
-      self.vgprPool.checkIn(addrV)
 
     return imod
 

@@ -407,11 +407,6 @@ def problemSizeParams(problemType, problem):
     if dstrides:
       rv.append(('d-strides', ",".join(map(str, dstrides))))
 
-    if problem.zeroPadA:
-        rv.append(('a-zero-pads', ';'.join([','.join(map(str,zp)) for zp in problem.zeroPadA])))
-    if problem.zeroPadB:
-        rv.append(('b-zero-pads', ';'.join([','.join(map(str,zp)) for zp in problem.zeroPadB])))
-
     return rv
 
 def dataInitParams(problemType):

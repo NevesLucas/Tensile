@@ -537,9 +537,6 @@ class KernelWriterAssembly(KernelWriter):
       # product of all summation dimensions, this also will be divided if GSU is enabled
       self.defineSgpr("UnrollLoopLastIter", 1)
 
-    if kernel["PackSummationDims"] and kernel["GlobalSplitU"]>1:
-      self.defineSgpr("GsuNumIter%s"%self.loopChar(kernel,self.unrollIdx), 1)
-
     if kernel["FractionalLoad"] == 2:
       if kernel["fractionalPerpOverhangA"]:
         self.defineSgpr("PerpOverhangVccA", 2, 2)
@@ -549,11 +546,6 @@ class KernelWriterAssembly(KernelWriter):
       # If need more SGPR could overlap this with the Tensor2dSize regs
       self.defineSgpr("ShadowLimitA", 2, 2)
       self.defineSgpr("ShadowLimitB", 2, 2)
-
-    if kernel["PackSummationDims"]:
-      for tc in ('A','B'):
-        self.defineSgpr("InitialSrd%sBase"%tc, 2)
-        self.defineSgpr("InitialSrd%sLimit"%tc, 2 if self.use64bShadowLimit else 1)
 
     if self.staggerU:
       self.defineSgpr("StaggerUIter", 1)  # stagger loop iterations, used for various iter counts in the code
@@ -651,9 +643,8 @@ class KernelWriterAssembly(KernelWriter):
     self.use64bPackSumOffset = 0  # use 2 SGPR for extracting packed summation dims.  Not supported, but this marks eventual required changes
 
     # use 64-bit buffer limit shadow register
-    # PackSummationDims does not support shadow limit - the address calc code would need to restore the shadow limit, which is possible
     # but not implemented or tested
-    self.use64bShadowLimit = kernel["Use64bShadowLimit"] and kernel["BufferLoad"] and not kernel["PackSummationDims"]
+    self.use64bShadowLimit = kernel["Use64bShadowLimit"] and kernel["BufferLoad"]
 
     # Check if the address setup code for LWA and GRO causes register growth.
     # This is not an error condition but bears further investigation.
@@ -1554,18 +1545,6 @@ class KernelWriterAssembly(KernelWriter):
 
     self.defineSgpr("GSUSumIdx", 2 if kernel["GlobalSplitU"] > 1 else 0)
 
-    self.sumMagicParms = []
-    if kernel["PackSummationDims"]:
-      self.magicSumChars = [globalParameters["IndexChars"][c] for c in kernel["ProblemType"]["IndicesSummation"][1:]]
-
-      self.sumMagicParms=["%s"%idxChar for idxChar in self.magicSumChars]
-      if kernel["PackSummationDims"] and kernel["GlobalSplitU"] > 1 and self.sumMagicParms:
-          self.sumMagicParms.append("%s_GsuRemainder"%self.unrollChar)
-
-      for magicName in self.sumMagicParms:
-        if kernel["MagicDivAlg"]==2:
-          self.defineSgpr("MagicAbitSize%s"%magicName, 1)
-
     # for packed batches without stride restrictions need to do something different here
     assert sorted(kernel["PackedC0IdxChars"]+kernel["PackedC1IdxChars"]) == \
            sorted(set(kernel["PackedC0IdxChars"]+kernel["PackedC1IdxChars"]))
@@ -1582,12 +1561,9 @@ class KernelWriterAssembly(KernelWriter):
     if len(kernel["PackedC1IndicesX"]) > 1:
       self.defineSgpr("PackedSize1", 1)
 
-    if kernel["PackSummationDims"]:
-      self.defineSgpr(self.loopCounterName(kernel,self.unrollIdx), 1)
-    else:
-      # contractions with multiple summations will use multiple LoopCounters, if PSD=0
-      for i in range(kernel["ProblemType"]["NumIndicesSummation"]):
-        self.defineSgpr(self.loopCounterName(kernel,i), 1)
+    # contractions with multiple summations will use multiple LoopCounters, if PSD=0
+    for i in range(kernel["ProblemType"]["NumIndicesSummation"]):
+      self.defineSgpr(self.loopCounterName(kernel,i), 1)
 
     self.defineSgpr("OrigLoopCounter", 1)
 
@@ -1651,15 +1627,6 @@ class KernelWriterAssembly(KernelWriter):
     self.defineSgpr("SizesFree", self.numSgprSizesFree)
     self.defineSgpr("SizesSum", self.numSgprSizesSum)
 
-    self.sumMagicParms = []
-    if kernel["PackSummationDims"]:
-      self.magicSumChars = [globalParameters["IndexChars"][c] for c in kernel["ProblemType"]["IndicesSummation"][1:]]
-      self.sumMagicParms=["%s"%idxChar for idxChar in self.magicSumChars]
-      if kernel["PackSummationDims"] and kernel["GlobalSplitU"] > 1 and self.sumMagicParms:
-          self.sumMagicParms.append("%s_GsuRemainder"%self.unrollChar)
-      for magicName in self.sumMagicParms:
-        self.defineSgpr("MagicNumberSize%s"%magicName, 1)
-        self.defineSgpr("MagicShiftSize%s"%magicName, 1)
     # for packed batches without stride restrictions need to do something different here
     assert sorted(kernel["PackedC0IdxChars"]+kernel["PackedC1IdxChars"]) == \
            sorted(set(kernel["PackedC0IdxChars"]+kernel["PackedC1IdxChars"]))
@@ -1733,8 +1700,7 @@ class KernelWriterAssembly(KernelWriter):
     self.numSgprToLoad = 2 + 2 + numSgprAddressD + numSgprAddressC + numSgprAddressA + numSgprAddressB + numSgprAlpha + \
       (numSgprBeta if kernel["ProblemType"]["UseBeta"] else 0) + self.numSgprStridesD + self.numSgprStridesC + self.numSgprStridesA + \
       self.numSgprStridesB + self.numSgprSizesFree + self.numSgprSizesSum + \
-      len(self.sumMagicParms)*2 + len(kernel["PackedC0IdxChars"][:-1])*2 + \
-      len(kernel["PackedC1IdxChars"][:-1])*2 + \
+      len(kernel["PackedC0IdxChars"][:-1])*2 + len(kernel["PackedC1IdxChars"][:-1])*2 + \
       1 + \
       2 + \
       pkArgumentToLoad + \
@@ -3047,10 +3013,6 @@ class KernelWriterAssembly(KernelWriter):
       kStr += inst("s_mov_b32", sgpr("PreLoopLWVmcntCase"), hex(1), "init PreLoopLWVmcntCase to 1")
 
     if kernel["MagicDivAlg"]==2:
-      for magicName in self.sumMagicParms:
-          kStr += inst("s_lshr_b32", sgpr("MagicAbitSize%s"%magicName), sgpr("MagicShiftSize%s"%magicName), 31,"extract abit")
-          kStr += inst("s_and_b32",  sgpr("MagicShiftSize%s"%magicName), sgpr("MagicShiftSize%s"%magicName), hex(0x7fffffff), "remove abit")
-
       for idxChar in sorted(set(kernel["PackedC0IdxChars"][:-1] + kernel["PackedC1IdxChars"][:-1])):
           kStr += inst("s_lshr_b32", sgpr("MagicAbitSize%s"%idxChar), sgpr("MagicShiftSize%s"%idxChar), 31,"extract abit")
           kStr += inst("s_and_b32",  sgpr("MagicShiftSize%s"%idxChar), sgpr("MagicShiftSize%s"%idxChar), hex(0x7fffffff), "remove abit")
@@ -4019,54 +3981,6 @@ class KernelWriterAssembly(KernelWriter):
           kStr += inst("s_mov_b32", sgpr(tmpSgpr), ldsInc, "" )
           kStr += inst("_v_sub_u32", vgpr(groVgpr), vgpr(groVgpr), sgpr(tmpSgpr), "sub offset for buffer_load instoffset")
 
-      for zpr in [zpr for zpr in self.zeroPadRegs[tc].values() if zpr.isMatch(perp, sPerp, para, sPara)]:
-        assert(zpr.state == ZeroPadReg.State.Allocated) # only calc address once
-        zpr.state = ZeroPadReg.State.CalculatedAddr
-        kStr += self.comment1(zpr.regName)
-        (freeDim,sumDim) = zpr.zp[:2]
-        freeDimChar = globalParameters["IndexChars"][freeDim]
-        sumDimChar  = globalParameters["IndexChars"][sumDim]
-        assert(iaToGpr[freeDim] != None)
-        kStr += inst("v_mul_lo_u32", \
-                  vgpr(zpr.regName), \
-                  vgpr(iaToGpr[freeDim]), \
-                  self.strideRef(tc, freeDim), \
-                  "zp.freeDim * strideFree")
-        vgprOffset = vgpr(iaToGpr[sumDim]) if vgpr(iaToGpr[sumDim]) else 0
-        if sumDim in kernel["ProblemType"]["MirrorDims%s"%tc]:
-          kStr += inst("_v_sub_u32", \
-                  vgpr(tmp), \
-                  sgpr("Size%s"%sumDimChar), \
-                  vgprOffset, \
-                  "zp.sumDim mirror 1")
-          kStr += inst("_v_sub_u32", \
-                  vgpr(tmp), \
-                  vgpr(tmp), \
-                  "1", \
-                  "zp.sumDim mirror 2")
-          vgprOffset = vgpr(tmp)
-        #iaToGpr[sumDim] will be 0 for other summation dims
-        kStr += inst("v_mul_lo_u32", \
-                  vgpr(tmp), \
-                  vgprOffset, \
-                  self.strideRef(tc, sumDim), \
-                  "zp.sumDim * strideSum")
-        kStr += inst("_v_add_u32", \
-                  vgpr(zpr.regName), \
-                  vgpr(zpr.regName), \
-                  vgpr(tmp),
-                  "zp.freeDim * strideFree + zp.sumDim * strideSum")
-        kStr += inst("v_lshlrev_b32", \
-                     vgpr(zpr.regName), \
-                     "Bpe%sLog2"%tc, \
-                     vgpr(zpr.regName), \
-                     "scale to bpe")
-        kStr += inst("_v_sub_u32",
-                  vgpr(zpr.regName), \
-                  vgpr(zpr.regName), \
-                  sgpr("PadStart%s%s%s"%(tc, freeDimChar, sumDimChar)), \
-                  "zp.freeDim * strideFree + zp.sumDim * strideSum PadStart")
-
       if kernel["BufferLoad"] and kernel["FractionalLoad"]:
         lastValidThread = kernel[tP["lsc"]]*kernel[tP["lsp"]]//tP["glvw"]
         if lastValidThread < kernel["NumThreads"]:
@@ -4209,7 +4123,6 @@ class KernelWriterAssembly(KernelWriter):
         kStr += self.s_mul_u64_u32(sgpr(stmp+0), sgpr(stmp+1), kernel["DepthU"], sgpr("GSUSumIdx"), "gsuOffset = DepthU*bpe*GSUSumIdx")
         if kernel["CheckDimOverflow"] >=2:
           kStr += self.assert_eq(sgpr(stmp+1),0)
-        # TODO - PackSummationDims handling needs to handle multiple sum dims
         unrollSummation = [ i for i in tP["ia"] if i in kernel["ProblemType"]["IndicesSummation"] ]
         stride = self.strideRef(tc,unrollSummation[-1])
         if tP["tlu"] and not self.isConstUnitStride(stride):
@@ -4339,16 +4252,6 @@ class KernelWriterAssembly(KernelWriter):
         kStr += self.assert_ne(sgpr(stmp+0), vgpr(t) )
         self.vgprPool.checkIn(t)
 
-    if kernel["PackSummationDims"]:
-      kStr += self.comment("Save the initial SRD and limit for later address calculation")
-      kStr += inst("s_mov_b32", sgpr("InitialSrd%sBase+0"%tc), sgpr("Srd%s+0"%tc), "save base")
-      kStr += inst("s_mov_b32", sgpr("InitialSrd%sBase+1"%tc), sgpr("Srd%s+1"%tc), "save base")
-      if self.use64bShadowLimit:
-        kStr += inst("s_mov_b32", sgpr("InitialSrd%sLimit+0"%tc), sgpr("ShadowLimit%s+0"%tc), "save shadow limit")
-        kStr += inst("s_mov_b32", sgpr("InitialSrd%sLimit+1"%tc), sgpr("ShadowLimit%s+1"%tc), "save shadow limit")
-      else:
-        kStr += inst("s_mov_b32", sgpr("InitialSrd%sLimit"%tc), sgpr("Srd%s+2"%tc), "save limit")
-
     return kStr
 
   ##############################################################################
@@ -4424,39 +4327,26 @@ class KernelWriterAssembly(KernelWriter):
     assert(self.unrollIdx == kernel["ProblemType"]["NumIndicesSummation"]-1)
     if loopIdx==self.unrollIdx:
       if self.globalReadIncsUseVgpr:
-        if kernel["PackSummationDims"]:
-          kStr += inst("v_mov_b32", \
-              vgpr("GlobalReadIncs%s+%u+0"%(tc, 2*loopIdx)), \
-              stride, \
-              "" )
-          kStr += inst("v_mov_b32", \
-              vgpr("GlobalReadIncs%s+%u+1"%(tc, 2*loopIdx)), \
-              0,
-              "" )
-        else:
-          tmpSgpr = self.getTmpSgpr(2).idx()
-          kStr += inst("s_mul_i32", sgpr(tmpSgpr+0), \
-              "DepthU*%d"%(gsu*tP["bpe"]), stride, \
-              "incr%s%s = %s*DepthU*bpe (unrollIdx)"%(tc, loopChar, stride) )
-          # TODO - this should be mul-H??
-          kStr += inst("s_mov_b32", \
-              sgpr(tmpSgpr+1), \
-              hex(0), \
-              "(carry)")
-          kStr += inst("v_mov_b32", \
-              vgpr("GlobalReadIncs%s+%u+0"%(tc, 2*loopIdx)), \
-              sgpr(tmpSgpr+0), \
-              "" )
-          kStr += inst("v_mov_b32", \
-              vgpr("GlobalReadIncs%s+%u+1"%(tc, 2*loopIdx)), \
-              sgpr(tmpSgpr+1), \
-              "" )
+        tmpSgpr = self.getTmpSgpr(2).idx()
+        kStr += inst("s_mul_i32", sgpr(tmpSgpr+0), \
+            "DepthU*%d"%(gsu*tP["bpe"]), stride, \
+            "incr%s%s = %s*DepthU*bpe (unrollIdx)"%(tc, loopChar, stride) )
+        # TODO - this should be mul-H??
+        kStr += inst("s_mov_b32", \
+            sgpr(tmpSgpr+1), \
+            hex(0), \
+            "(carry)")
+        kStr += inst("v_mov_b32", \
+            vgpr("GlobalReadIncs%s+%u+0"%(tc, 2*loopIdx)), \
+            sgpr(tmpSgpr+0), \
+            "" )
+        kStr += inst("v_mov_b32", \
+            vgpr("GlobalReadIncs%s+%u+1"%(tc, 2*loopIdx)), \
+            sgpr(tmpSgpr+1), \
+            "" )
       else: # not globalReadIncsUseVgpr, ie use SGPR
 
-        if kernel["PackSummationDims"]:
-          m = "Bpe%s"%(tc)
-        else:
-          m = "DepthU*Bpe%s"%(tc)
+        m = "DepthU*Bpe%s"%(tc)
         if gsu>1:
           m += "*%d"%gsu
 
@@ -4478,94 +4368,78 @@ class KernelWriterAssembly(KernelWriter):
             % kernel["ProblemType"]["NumIndicesSummation"] )
       else:
         graInc = "GlobalReadIncs%s+%u"%(tc, loopIdx)
-        if kernel["PackSummationDims"]:
-          # simpler address calculation here - don't need to subtract prev iteration increments
-          # since only one iteration
-          if isMirrorIdx:
-            kStr += inst("s_mul_i32", \
-                sgpr(graInc), \
-                stride, \
-                "-Bpe%s"%tc,
-                "<- scale by bpe")
-          else:
-            kStr += inst("s_lshl_b32", \
-                sgpr(graInc), \
-                stride, \
-                "Bpe%sLog2"%tc,
-                "<- scale by bpe")
+        # subtract increments done by the inner iterations
+        # may be negative:
+        loopIdxPrev = loopIdx + 1
+        dimIdxPrev    = kernel["ProblemType"]["IndicesSummation"][loopIdxPrev] # dimension index
+        loopCharPrev  = self.indexChars[dimIdxPrev]
+        stridePrev = self.strideRef(tc, dimIdxPrev)
+        isMirrorIdxPrev = dimIdxPrev in kernel["ProblemType"]["MirrorDims%s"%tc]
+
+        kStr += self.comment("compute globalReadInc for higher-level loop")
+
+        tmpSgpr = self.getTmpSgpr(3).idx()
+        # Summations always appear in both A and B, can compute number of iterations just once:
+        if loopIdxPrev==self.unrollIdx:
+          loopCounterName= self.loopCounterName(kernel, self.unrollIdx)
+          if tP["isA"]:
+            quotient = loopCounterName
+            dividend = "SizesSum+%u"%self.unrollIdx
+            divisor = kernel["DepthU"]
+            if self.noTailLoop and kernel["AssertSummationElementMultiple"] % kernel["DepthU"] != 0:
+              # round up SizesSum/DepthU for noTailLoop case
+              kStr += inst("s_add_i32", sgpr(quotient), (divisor - 1), sgpr(dividend), \
+                  "round up SizeSum / DepthU" )
+              kStr += scalarStaticDivideAndRemainder(quotient, None, quotient, \
+                          divisor, tmpSgpr+2, 0)
+            else:
+              kStr += scalarStaticDivideAndRemainder(quotient, None, dividend, \
+                          divisor, tmpSgpr+2, 0)
+
+            if kernel["GlobalSplitU"] > 1:
+              kStr += self.calculateLoopNumIterGsu(kernel, loopCounterName, tmpSgpr)
+
+            kStr += inst("s_mul_i32", sgpr(loopCounterName), sgpr(loopCounterName), \
+                      kernel["GlobalSplitU"]*kernel["DepthU"], \
+                      "=loopCounterName*DepthU")
+          kStr += inst("s_mul_i32", sgpr(graInc), stridePrev, sgpr(loopCounterName), \
+                "tmp <- stride%s%s * myWgUnrollIters" %(tc, loopCharPrev))
         else:
-          # subtract increments done by the inner iterations
-          # may be negative:
-          loopIdxPrev = loopIdx + 1
-          dimIdxPrev    = kernel["ProblemType"]["IndicesSummation"][loopIdxPrev] # dimension index
-          loopCharPrev  = self.indexChars[dimIdxPrev]
-          stridePrev = self.strideRef(tc, dimIdxPrev)
-          isMirrorIdxPrev = dimIdxPrev in kernel["ProblemType"]["MirrorDims%s"%tc]
+          kStr += inst("s_mul_i32", sgpr(graInc), stridePrev, self.sizeRef(dimIdxPrev), \
+                "tmp <- stride%s%s * size%s%s" %(tc, loopCharPrev, tc, loopCharPrev))
 
-          kStr += self.comment("compute globalReadInc for higher-level loop")
-
-          tmpSgpr = self.getTmpSgpr(3).idx()
-          # Summations always appear in both A and B, can compute number of iterations just once:
-          if loopIdxPrev==self.unrollIdx:
-            loopCounterName= self.loopCounterName(kernel, self.unrollIdx)
-            if tP["isA"]:
-              quotient = loopCounterName
-              dividend = "SizesSum+%u"%self.unrollIdx
-              divisor = kernel["DepthU"]
-              if self.noTailLoop and kernel["AssertSummationElementMultiple"] % kernel["DepthU"] != 0:
-                # round up SizesSum/DepthU for noTailLoop case
-                kStr += inst("s_add_i32", sgpr(quotient), (divisor - 1), sgpr(dividend), \
-                    "round up SizeSum / DepthU" )
-                kStr += scalarStaticDivideAndRemainder(quotient, None, quotient, \
-                            divisor, tmpSgpr+2, 0)
-              else:
-                kStr += scalarStaticDivideAndRemainder(quotient, None, dividend, \
-                            divisor, tmpSgpr+2, 0)
-
-              if kernel["GlobalSplitU"] > 1:
-                kStr += self.calculateLoopNumIterGsu(kernel, loopCounterName, tmpSgpr)
-
-              kStr += inst("s_mul_i32", sgpr(loopCounterName), sgpr(loopCounterName), \
-                        kernel["GlobalSplitU"]*kernel["DepthU"], \
-                        "=loopCounterName*DepthU")
-            kStr += inst("s_mul_i32", sgpr(graInc), stridePrev, sgpr(loopCounterName), \
-                  "tmp <- stride%s%s * myWgUnrollIters" %(tc, loopCharPrev))
-          else:
-            kStr += inst("s_mul_i32", sgpr(graInc), stridePrev, self.sizeRef(dimIdxPrev), \
-                  "tmp <- stride%s%s * size%s%s" %(tc, loopCharPrev, tc, loopCharPrev))
-
-          # subtract amount that previous inner loop will have already incremented:
-          # graInc is used as temp for the prev loop calc
-          if isMirrorIdx and isMirrorIdxPrev:
-            kStr += inst("s_sub_i32", sgpr(graInc), \
-                sgpr(graInc), \
-                stride, \
-                "incr%s%s = <prev-incs> - stride%s%s"%(tc, loopChar, tc, loopChar) )
-          elif isMirrorIdx:
-            kStr += inst("s_add_i32", sgpr(graInc), \
-                stride, \
-                sgpr(graInc), \
-                "incr%s%s = stride%s%s + <prev-incs>"%(tc, loopChar, tc, loopChar) )
-            kStr += inst("s_sub_i32", sgpr(graInc), \
-                0, \
-                sgpr(graInc), \
-                "incr%s%s = - (stride%s%s + <prev-incs>)"%(tc, loopChar, tc, loopChar) )
-          elif isMirrorIdxPrev:
-            kStr += inst("s_add_i32", sgpr(graInc), \
-                stride, \
-                sgpr(graInc), \
-                "incr%s%s = stride%s%s + <prev-incs>"%(tc, loopChar, tc, loopChar) )
-          else:
-            kStr += inst("s_sub_i32", sgpr(graInc), \
-                stride, \
-                sgpr(graInc), \
-                "incr%s%s = stride%s%s - <prev-incs>"%(tc, loopChar, tc, loopChar) )
-
-          kStr += inst("s_lshl_b32", \
+        # subtract amount that previous inner loop will have already incremented:
+        # graInc is used as temp for the prev loop calc
+        if isMirrorIdx and isMirrorIdxPrev:
+          kStr += inst("s_sub_i32", sgpr(graInc), \
               sgpr(graInc), \
+              stride, \
+              "incr%s%s = <prev-incs> - stride%s%s"%(tc, loopChar, tc, loopChar) )
+        elif isMirrorIdx:
+          kStr += inst("s_add_i32", sgpr(graInc), \
+              stride, \
               sgpr(graInc), \
-              "Bpe%sLog2"%tc,
-              "<- scale by bpe")
+              "incr%s%s = stride%s%s + <prev-incs>"%(tc, loopChar, tc, loopChar) )
+          kStr += inst("s_sub_i32", sgpr(graInc), \
+              0, \
+              sgpr(graInc), \
+              "incr%s%s = - (stride%s%s + <prev-incs>)"%(tc, loopChar, tc, loopChar) )
+        elif isMirrorIdxPrev:
+          kStr += inst("s_add_i32", sgpr(graInc), \
+              stride, \
+              sgpr(graInc), \
+              "incr%s%s = stride%s%s + <prev-incs>"%(tc, loopChar, tc, loopChar) )
+        else:
+          kStr += inst("s_sub_i32", sgpr(graInc), \
+              stride, \
+              sgpr(graInc), \
+              "incr%s%s = stride%s%s - <prev-incs>"%(tc, loopChar, tc, loopChar) )
+
+        kStr += inst("s_lshl_b32", \
+            sgpr(graInc), \
+            sgpr(graInc), \
+            "Bpe%sLog2"%tc,
+            "<- scale by bpe")
 
         if 0 and tP["isB"] and loopIdx==0:
           kStr += self.bomb()
@@ -5236,14 +5110,6 @@ class KernelWriterAssembly(KernelWriter):
       else:
         kStr += inst ("s_mov_b32", sgpr("UnrollLoopLastIter"), self.loopSizeRef(kernel, self.unrollIdx), "init")
 
-      if kernel["PackSummationDims"]:
-        if kernel["GlobalSplitU"]>1:
-          kStr += inst ("s_mov_b32", sgpr("GsuNumIter%s"%self.loopChar(kernel,self.unrollIdx)), \
-                        sgpr("UnrollLoopLastIter"), "save innermost iters for later unpacking")
-        for idx in range(self.otherSummations):
-          kStr += inst ("s_mul_i32", sgpr("UnrollLoopLastIter"), sgpr("UnrollLoopLastIter"), \
-                            self.loopSizeRef(kernel, idx), "")
-
     return kStr
 
   ##############################################################################
@@ -5523,7 +5389,7 @@ class KernelWriterAssembly(KernelWriter):
       #if self.prefetchAcrossPersistent0 and kernel["ExpandPointerSwap"] and not isPap:
       #  kStr += inst("s_and_b32", sgpr("BreakAtEvenIter"), sgpr("OrigLoopCounter"), \
       #            0x1, "save unroll loop start position - copy1 or copy2")
-    elif not kernel["PackSummationDims"]:
+    else:
       # other summation, not unroll loop
       #printExit("no assembly support for 2+ dimensional summation")
       kStr += self.comment("%sother summation, numIter%s = size%s" \
@@ -6797,113 +6663,8 @@ class KernelWriterAssembly(KernelWriter):
                    loopCounter, loopCounter,
                    "DepthU",  "increment psdIter")
 
-    if loopIdx==self.unrollIdx and kernel["PackSummationDims"] and self.actualSummationLoops==1:
-      incSize = 2 if self.use64bPackSumOffset else 1
-      tmpSgpr = self.getTmpSgpr(3 + 2*incSize + (3 if kernel["GlobalSplitU"]>1 else 0)).idx()
-      inc ={}
-      inc['A'] = tmpSgpr + 3
-      inc['B'] = inc['A'] + incSize
-      gsuMagic = inc['B'] + incSize
-
-      psdPackedBits = "DepthU" if prefetchIndex>0 else unrollLoopCounter
-      incCodeA.addComment1("extract indices here from %s"%psdPackedBits)
-      for oSum in reversed(range(problemType["NumIndicesSummation"])):
-        sumDim  = problemType["IndicesSummation"][oSum]
-        sumChar = self.indexChars[sumDim]
-        firstIter = (oSum==problemType["NumIndicesSummation"]-1)
-        lastIter  = (oSum==0)
-
-        incCodeA.addComment1("extract index %s"%sumChar)
-
-        if not lastIter:
-          if oSum==self.unrollIdx and kernel["GlobalSplitU"] > 1:
-            # GSU divides the first loop counter size by some amount
-            size = "GsuNumIter%s"%sumChar
-          else:
-            size = "Size%s"%sumChar
-
-          if firstIter:
-            psdPackedBits2 = psdPackedBits
-          else:
-            psdPackedBits2 = sgpr(tmpSgpr+2)
-            incCodeA.addInst("s_mov_b32", psdPackedBits2, psdPackedBits, "copy psdPackedBits")
-
-          if oSum==self.unrollIdx and kernel["GlobalSplitU"] > 1:
-            # compare GSUA
-            # cmov into temps for Size,Abit,Shift
-            # divide and go.
-            # need more temps for this, need divide routine to take 3 parms
-            incCodeA.addInst("s_cmp_lt_u32", sgpr("GSUSumIdx"), sgpr("GSUSumIdx+1"), \
-                "gsuSumIdx < numIterPerWgRemainder" )
-            incCodeA.addInst("s_cselect_b32", sgpr(gsuMagic+0), sgpr("MagicNumberSize%s_GsuRemainder"%sumChar),
-                              sgpr("MagicNumberSize%s"%sumChar), "Use alternate divisor")
-            incCodeA.addInst("s_cselect_b32", sgpr(gsuMagic+1), sgpr("MagicAbitSize%s_GsuRemainder"%sumChar),
-                              sgpr("MagicAbitSize%s"%sumChar), "Use alternate divisor")
-            incCodeA.addInst("s_cselect_b32", sgpr(gsuMagic+2), sgpr("MagicShiftSize%s_GsuRemainder"%sumChar),
-                              sgpr("MagicShiftSize%s"%sumChar), "Use alternate divisor")
-            incCodeA.addText(self.scalarMagicDivExplicit(tmpSgpr, psdPackedBits,
-                              magicNumber=gsuMagic+0, magicAbit=gsuMagic+1, magicShift=gsuMagic+2))
-          else:
-            incCodeA.addText(self.scalarMagicDiv(tmpSgpr, psdPackedBits, sumChar))
-
-          # TODO-64
-          incCodeA.addInst("s_mul_i32", sgpr(tmpSgpr+1), sgpr(tmpSgpr+0), sgpr(size), "remainder step 1")
-          incCodeA.addInst("s_sub_u32", sgpr(tmpSgpr+1), psdPackedBits2, sgpr(tmpSgpr+1), "remainder step 2")
-          iterX=sgpr(tmpSgpr+1)
-        elif firstIter and lastIter:
-          # just one iter, use loop counter directly not remainder
-          iterX = psdPackedBits
-        else:
-          iterX=sgpr(tmpSgpr+0)
-
-        # update psdOffset. Inputs:
-        #   - tmpSgpr+0== packedBits, and must be preserved for next iteration
-        #   - iterX, number of iterations for this dim.  Used in A/B increment loop below
-        for tc in ('A','B'):
-          assert(not self.use64bPackSumOffset)
-          if firstIter:
-            #incCodeA.addText(self.s_mul_u64_u32(inc{'A'}+0, inc{'A'}+1, tmpSgpr+1, sgpr["GlobalReadIncs%s+%d"]))
-            incCodeA.addInst("s_mul_i32", sgpr(inc[tc]), iterX, sgpr("GlobalReadIncs%s+%d"%(tc,oSum)),
-                              "psdOffset%s += scale iter%s"%(tc,sumChar))
-          else:
-            incCodeA.addInst("s_mul_i32", sgpr(tmpSgpr+2), iterX, sgpr("GlobalReadIncs%s+%d"%(tc,oSum)), "Scale iter%s"%sumChar)
-            incCodeA.addInst("s_add_u32", sgpr(inc[tc]+0), sgpr(inc[tc]+0), sgpr(tmpSgpr+2), "psdOffset%s += scale iter%s"%(tc,sumChar))
-            #incCodeA.addText(self.s_mul_u64_u32(tmp+0, inc{'A'}+1, tmpSgpr+1, sgpr["GlobalReadIncsA"]))
-
-          psdPackedBits = sgpr(tmpSgpr+0)
-
-        if 0 and lastIter:
-          incCodeA.addText(self.assert_ne(sgpr("LoopCounterM"), 8))
-
-      assert(kernel["BufferLoad"])
-
-      incCodeA.addText("\n")
-      incCodeA.addComment1("Reset and increment SRDs")
-      for tc in ('A','B'):
-        incCodeA.addInst("s_mov_b32", sgpr("Srd%s+0"%tc), sgpr("InitialSrd%sBase+0"%tc), "restore base")
-        incCodeA.addInst("s_mov_b32", sgpr("Srd%s+1"%tc), sgpr("InitialSrd%sBase+1"%tc), "restore base")
-        if self.use64bShadowLimit:
-          incCodeA.addInst("s_mov_b32", sgpr("ShadowLimit%s+0"%tc), sgpr("InitialSrd%sLimit+0"%tc), "restore shadow limit")
-          incCodeA.addInst("s_mov_b32", sgpr("ShadowLimit%s+1"%tc), sgpr("InitialSrd%sLimit+1"%tc), "restore shadow limit")
-          assert(0) # not tested, would maybe need to restore base too if limit 0
-        else:
-          incCodeA.addInst("s_mov_b32", sgpr("Srd%s+2"%tc), sgpr("InitialSrd%sLimit"%tc), "restore limit")
-
-
-      # TODO - this skips over the stagger-u wrap codes
-      def incrementSrdPsd(tc, tp):
-        incCodeA.addText("\n")
-        incUpperA = sgpr(inc[tc]+1) if self.use64bPackSumOffset else 0
-        if bool(set(kernel["ProblemType"]["IndicesSummation"]).intersection(set(kernel["ProblemType"]["MirrorDims%s"%tc]))) and not self.use64bPackSumOffset:
-          incUpperA = sgpr(self.getTmpSgpr(1).idx())
-          incCodeA.addInst("s_ashr_i32", incUpperA, sgpr(inc[tc]), 31, "sign-extend")
-        incCodeA.addCode(self.incrementSrd(kernel, tp, sgpr(inc[tc]), incUpperA))
-
-      incrementSrdPsd('A', self.tPA)
-      incrementSrdPsd('B', self.tPB)
-    else:
-      self.globalReadIncrement(kernel, incCodeA, loopIdx, self.tPA, prefetchIndex, incs)
-      self.globalReadIncrement(kernel, incCodeB, loopIdx, self.tPB, prefetchIndex, incs)
+    self.globalReadIncrement(kernel, incCodeA, loopIdx, self.tPA, prefetchIndex, incs)
+    self.globalReadIncrement(kernel, incCodeB, loopIdx, self.tPB, prefetchIndex, incs)
     return imod
 
   ##############################################################################

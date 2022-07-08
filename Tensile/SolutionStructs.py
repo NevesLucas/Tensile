@@ -2013,9 +2013,6 @@ class Solution(collections.abc.Mapping):
       if (not state["EnableMatrixInstruction"]) and state["VectorWidth"] < 4:
         reject(state, "VectorWidth must be >= 4 for Int8")
 
-    #if state["KernelLanguage"] == "Assembly" and state["PackSummationDims"]:
-    #    reject(state, "PackSummationDims does not yet support assembly")
-
     # Default GlobalReadVectorWidth
     if state["GlobalReadVectorWidth"] == -1:
       state["GlobalReadVectorWidth"] = state["VectorWidth"]
@@ -2346,7 +2343,7 @@ class Solution(collections.abc.Mapping):
 
     assert(state["DepthU"]> 0)
 
-    if state["UnrollIncIsDepthU"] or state["PackSummationDims"] == 1:
+    if state["UnrollIncIsDepthU"]:
         # unrollIncIsDepthU does not support tail loop, so add asem requirement to reject
         # problems that require tail loop.
         if state["DepthU"] % state["AssertSummationElementMultiple"] != 0:

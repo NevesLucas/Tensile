@@ -58,7 +58,6 @@ class Solutions:
                         ]},
                     {"DepthU": [8]},
                     {"PackBatchDims": [1]}, # required to handle some Backward-Weights cases
-                    {"PackSummationDims": [1]}, # required to handle padding cases
                     {"GlobalReadVectorWidth": [1]},
                     {"VectorWidth": [1]},
                 ]
@@ -82,7 +81,6 @@ class Solutions:
                         ]},
                     {"DepthU": [4]},
                     {"PackBatchDims": [0,1]},
-                    {"PackSummationDims": [0,1]},
                     {"GlobalSplitU": [1,2,4,7,17]},
                     {"GlobalReadVectorWidth": [-1]},
                     {"VectorWidth": [1,-1]},
@@ -106,7 +104,6 @@ class Solutions:
                         ]},
                     {"DepthU": [8]},
                     {"PackBatchDims": [1]}, # required to handle some Backward-Weights cases
-                    {"PackSummationDims": [1]}, # required to handle padding cases
                     {"GlobalReadVectorWidth": [-1]},
                     {"VectorWidth": [1]},
                     {"FractionalLoad": [1]}
@@ -133,7 +130,6 @@ class Solutions:
                         ]},
                     {"DepthU": [8]},
                     {"GlobalReadVectorWidth": [-1]},
-                    {"PackSummationDims": [0,1]},
                     {"VectorWidth": [1,4]},
                     {"FractionalLoad": [1]},
                     {"PackBatchDims": [0,1]},
@@ -163,7 +159,6 @@ class Solutions:
                         #[ 16, 16, 2],
                         ]},
                     {"DepthU": [8]},
-                    {"PackSummationDims": [0,1]},
                     {"GlobalReadVectorWidth": [-1]},
                     {"GlobalSplitU": [1,2,3,4,8,17]},
                     {"VectorWidth": [1,4]},
@@ -193,7 +188,6 @@ class Solutions:
                         ]},
                     {"DepthU": [8]},
                     {"GlobalReadVectorWidth": [-1,2]},
-                    {"PackSummationDims": [0,1]},
                     {"VectorWidth": [1,4]},
                     {"FractionalLoad": [1]},
                     {"PackBatchDims": [0,1]},

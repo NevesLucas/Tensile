@@ -2933,11 +2933,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if not self.noTailLoop:
       ########################################
       # Tail Loop
-      # PackSummationDims=1 requires that the tile slice does not cross DepthU
       # which means tail loop not needed.
       ########################################
       self.inTailLoop = True
-      if kernel["LoopTail"] and not kernel["PackSummationDims"]:
+      if kernel["LoopTail"]:
         kl.append(self.comment3("Tail Loop"))
 
         # Update local write pointers in case the upcoming global reads are writing directly to LDS:
@@ -3305,7 +3304,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     self.noTailLoop = kernel["NoTailLoop"]
 
-    self.actualSummationLoops = 1 if kernel["PackSummationDims"] else kernel["ProblemType"]["NumIndicesSummation"]
+    self.actualSummationLoops = kernel["ProblemType"]["NumIndicesSummation"]
     self.otherSummationLoops  = self.actualSummationLoops-1
     self.otherSummations      = kernel["ProblemType"]["NumIndicesSummation"]-1 # not loops but summations vars
 
@@ -3313,7 +3312,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # is required.
     # if 1, unroll loop starts at 0 and increments by DEPTHU.  No scaling is required.  This mode is required
     # for pack summation dims, but can also be used independently and this is useful for isolation and testing.
-    self.unrollIncIsDepthU = kernel["UnrollIncIsDepthU"] or kernel["PackSummationDims"]
+    self.unrollIncIsDepthU = kernel["UnrollIncIsDepthU"]
 
     # turn on parts of prefetchAcrossPersistent code for testing
     self.prefetchAcrossPersistent0 = 0 or self.prefetchAcrossPersistent

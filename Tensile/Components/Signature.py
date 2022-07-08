@@ -208,10 +208,6 @@ class SignatureCOV2(Signature):
         for i in range(0, writer.numSgprSizesSum):
             kStr += self.v2Argument(                  "SizesSum%u"%i,     '4',      '4',      "ByValue",        "U32"); ka_size += 4
 
-        for magicName in writer.sumMagicParms:
-            kStr += self.v2Argument(     "MagicNumberSize%s"%magicName,     '4',      '4',      "ByValue",        "U32"); ka_size += 4
-            kStr += self.v2Argument(      "MagicShiftSize%s"%magicName,     '4',      '4',      "ByValue",        "U32"); ka_size += 4
-
         for idxChar in kernel["PackedC0IdxChars"][:-1]:
             kStr += self.v2Argument(     "MagicNumberSize%s"%idxChar,     '4',      '4',      "ByValue",        "U32"); ka_size += 4
             kStr += self.v2Argument(      "MagicShiftSize%s"%idxChar,     '4',      '4',      "ByValue",        "U32"); ka_size += 4
@@ -432,10 +428,6 @@ class SignatureCOV3(Signature):
 
         for i in range(0, writer.numSgprSizesSum):
             kStr += self.v3Argument(                  "SizesSum%u"%i,     '4', offset,      "by_value",        "u32"); offset += 4
-
-        for magicName in writer.sumMagicParms:
-            kStr += self.v3Argument(     "MagicNumberSize%s"%magicName,     '4', offset,      "by_value",        "u32"); offset += 4
-            kStr += self.v3Argument(      "MagicShiftSize%s"%magicName,     '4', offset,      "by_value",        "u32"); offset += 4
 
         for idxChar in kernel["PackedC0IdxChars"][:-1]:
             kStr += self.v3Argument(     "MagicNumberSize%s"%idxChar,     '4', offset,      "by_value",        "u32"); offset += 4

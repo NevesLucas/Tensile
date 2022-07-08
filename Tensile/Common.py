@@ -1014,15 +1014,6 @@ validParameters = {
     # debug mode, uses the PackSummationDims method to increment the unroll loop counter
     "UnrollIncIsDepthU":         [0,1],
 
-    # Granularity allowed when packing tensor dims.
-    # Lower values are finer granularity which requires more dimension division operations on store path
-    # but supports more flexible tensor dimes.
-    # Higher values are coarser values - less dimension division operations but tensor dims must meet
-    # more stringent element multiple requirements
-    # 0x1 : Any dimension supported, compute dims after each element (not supported yet)
-    # 0x2 : VectorWidth must not span tensor dim
-    "PackGranularity": [2],
-
     # Controls desired width (#elements) for loads from global memory -> LDS.
     # and eliminates the pointer unshift logic
     # -1 : Set GlobalReadVectorWidth =  VectorWidth
@@ -1293,7 +1284,6 @@ defaultBenchmarkCommonParameters = [
     {"PackFreeDims":              [ 1 ] },
     {"PackSummationDims":         [ 0 ] },
     {"UnrollIncIsDepthU":         [ 0 ] },
-    {"PackGranularity":           [ 2 ] },
     {"FractionalLoad":            [ 0 ] },
     {"Use64bShadowLimit":         [ 1 ] },
     {"VectorAtomicWidth":         [ -1 ] },

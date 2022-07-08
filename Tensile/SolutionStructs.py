@@ -3142,7 +3142,7 @@ class Solution(collections.abc.Mapping):
         if not bufferLoad:
           reject(state, "Packed dims for Assembly requires BufferLoad")
 
-    if packedC0 and state["PackGranularity"]==2:
+    if packedC0: # VectorWidth must not span tensor dim
       if state["KernelLanguage"] == "Source":
         if state["AssertFree0ElementMultiple"]<state["VectorWidth"]:
           reject(state, "packedC0 Source requires AF0EM>=VectorWidth (for loads and stores)")

@@ -11017,24 +11017,18 @@ class KernelWriterAssembly(KernelWriter):
                 kStr += inst("s_or_b{}".format(wavelen), sgpr(tmpS01,laneSGPRC), \
                       sgpr(tmpS01,laneSGPRC), sgpr(tmpS23,laneSGPRC), "combine with tmp mask")
 
-            if kernel["DisableAtomicFail"]:
-              kStr += inst("s_mov_b{}".format(wavelen),  sgpr(mask,laneSGPRC), 0, "DisableAtomicFail, force 0" )
-            else:
-              kStr += inst("s_and_b{}".format(wavelen),  sgpr(mask,laneSGPRC), sgpr(tmpS01,laneSGPRC), sgpr(mask,laneSGPRC), "inBounds & must try again" )
+            kStr += inst("s_and_b{}".format(wavelen),  sgpr(mask,laneSGPRC), sgpr(tmpS01,laneSGPRC), sgpr(mask,laneSGPRC), "inBounds & must try again" )
 
           else:
             for avi in range(0, gwvw//atomicW):
               dataV = ss.elementData[elementIdx] + int(avi*ss.cfg.numVgprsPerDataPerVI)
               atomicDestVgpr = dataV if kernel["BufferStore"] else dataV+2
-              if kernel["DisableAtomicFail"]:
-                kStr += inst("s_mov_b{}".format(wavelen),  sgpr(mask,laneSGPRC), 0, "DisableAtomicFail, force 0" )
+              if kernel["ProblemType"]["DestDataType"].isDouble():
+                kStr += inst("v_cmp_ne_u64", sgpr(mask,laneSGPRC), vgpr(atomicDestVgpr,2), \
+                    vgpr(dataV+2,2), "c read during atomic != c read during prior load" )
               else:
-                if kernel["ProblemType"]["DestDataType"].isDouble():
-                  kStr += inst("v_cmp_ne_u64", sgpr(mask,laneSGPRC), vgpr(atomicDestVgpr,2), \
-                      vgpr(dataV+2,2), "c read during atomic != c read during prior load" )
-                else:
-                  kStr += inst("v_cmp_ne_u32", sgpr(mask,laneSGPRC), vgpr(atomicDestVgpr), \
-                      vgpr(dataV+1), "c read during atomic != c read during prior load" )
+                kStr += inst("v_cmp_ne_u32", sgpr(mask,laneSGPRC), vgpr(atomicDestVgpr), \
+                    vgpr(dataV+1), "c read during atomic != c read during prior load" )
 
         # or masks together to check early exit
         kStr += self.comment("or masks to check for exit")

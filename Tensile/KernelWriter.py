@@ -21,14 +21,12 @@
 
 from . import Code
 from . import Common
-from .Common import globalParameters, CHeader, roundUp, Backup, print2
-from .ReplacementKernels import ReplacementKernels
+from .Common import globalParameters, CHeader, roundUp, Backup, print2, printExit
 from .CustomKernels import isCustomKernelConfig
 from .SolutionStructs import Solution
 
 import abc
 import os
-import shutil
 import subprocess
 import copy
 from math import ceil
@@ -4742,17 +4740,6 @@ for codeObjectFileName in codeObjectFileNames:
       os.chmod(bytearrayFileName, 0o777)
     return bytearrayFileName
 
-  def getReplacementKernelPath(self, kernel):
-    if not kernel["ReplacementKernel"] and not isCustomKernelConfig(kernel): #kernel["CustomKernelName"]:
-      return None
-
-    kernelName = self.getKernelName(kernel)
-
-    if isCustomKernelConfig(kernel):
-      return os.path.join(globalParameters["CustomKernelDirectory"], (kernelName + ".s"))
-    else: # Replacement kernel
-      return ReplacementKernels.Get(kernelName)
-
   def shortenFileBase(self, kernel):
     base = self.getKernelName(kernel)
     if len(base) <= globalParameters["MaxFileName"]:
@@ -4777,38 +4764,13 @@ for codeObjectFileName in codeObjectFileNames:
     fileBase = os.path.join(asmPath, kernelName )
     assemblyFileName = "%s.s" % fileBase
 
-    replacementKernel = self.getReplacementKernelPath(kernel)
+    kernelSource = self.getKernelSource(kernel)
 
-    if replacementKernel is not None:
-      self.tPA = tensorParametersA = {}
-      self.tPB = tensorParametersB = {}
-      if isCustomKernelConfig(kernel):
-        kernelFoundMessage = "Custom kernel filename "
-        # ISA version, such as 803
-        self.kernel = kernel
-        self.language = "ASM"
-        self.version = globalParameters["CurrentISA"]
-        if "ISA" in kernel:
-          self.version = tuple(kernel["ISA"])
-        if not globalParameters["AsmCaps"][self.version]["SupportedISA"]:
-          defaultIsa = (9,0,0)
-          print("warning: ISA:", self.version, " is not supported; overriding with ", defaultIsa)
-          self.version = defaultIsa
-      else:
-        kernelFoundMessage = "replacement_assemblyFilename "
-        self.initKernel(kernel, tensorParametersA, tensorParametersB )
+    if globalParameters["PrintLevel"] >= 2:
+      print("write_assemblyFilename %s" % assemblyFileName)
 
-      shutil.copyfile(replacementKernel, assemblyFileName)
-      if globalParameters["PrintLevel"] >= 1:
-        print(kernelFoundMessage + assemblyFileName)
-    else:
-      kernelSource = self.getKernelSource(kernel)
-
-      if globalParameters["PrintLevel"] >= 2:
-        print("write_assemblyFilename %s" % assemblyFileName)
-
-      with open(assemblyFileName, 'w') as assemblyFile:
-        assemblyFile.write(kernelSource)
+    with open(assemblyFileName, 'w') as assemblyFile:
+      assemblyFile.write(kernelSource)
 
     return assemblyFileName
 

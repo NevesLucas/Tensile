@@ -38,7 +38,7 @@ import shutil
 import sys
 
 
-def parseCurrentLibrary(libPath, skipRK, sizePath):
+def parseCurrentLibrary(libPath, sizePath):
     libYaml = LibraryIO.readYAML(libPath)
     # parseLibraryLogicData mutates the original data, so make a copy
     fields = LibraryIO.parseLibraryLogicData(copy.deepcopy(libYaml), libPath)
@@ -52,17 +52,9 @@ def parseCurrentLibrary(libPath, skipRK, sizePath):
     sizes = []
     if sizePath is None:
         for (size, mapping) in exactLogic:
-            if skipRK:
-                sol = solutions[mapping[0]]
-                if sol["ReplacementKernel"]:
-                    continue
-
             sizes.append({"Exact": size})
     else:
         sizes = LibraryIO.readYAML(sizePath)
-
-    if skipRK:
-        solutions = [s for s in solutions if not s["ReplacementKernel"]]
 
     # remove duplicate solutions and reindex
     solutions = [v1 for i, v1 in enumerate(solutions) if not any(v1 == v2 for v2 in solutions[:i])]
@@ -137,9 +129,6 @@ def TensileRetuneLibrary(userArgs):
     argParser.add_argument("--update-method", "-u", dest="updateMethod",
                            choices=["remake", "update", "both"], default="remake",
                            help="Method for making new library logic file")
-    argParser.add_argument("--skip-replacement-kernels", "-s", dest="skipRK", action="store_true",
-                           help="Exclude sizes and solutions related to replacement kernels. "
-                                "Forces update-method to 'remake'")
 
     addCommonArguments(argParser)
     args = argParser.parse_args(userArgs)
@@ -150,11 +139,6 @@ def TensileRetuneLibrary(userArgs):
     print1("#")
     print1(HR)
     print1("")
-
-    if args.skipRK and args.updateMethod != "remake":
-        printWarning("--skip-replacement-kernels=true only compatable with --update-method=remake:"
-                     "\n\tsetting --update-method=remake")
-        args.updateMethod = "remake"
 
     if args.updateMethod == "remake":
         update = False
@@ -181,7 +165,7 @@ def TensileRetuneLibrary(userArgs):
         Common.globalParameters[key] = value
 
     # parse library logic then setup and run benchmarks
-    (rawYaml, solutions, problemSizes) = parseCurrentLibrary(libPath, args.skipRK, sizePath)
+    (rawYaml, solutions, problemSizes) = parseCurrentLibrary(libPath, sizePath)
     runBenchmarking(solutions, problemSizes, outPath, update)
 
     if remake:

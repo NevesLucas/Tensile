@@ -1174,9 +1174,6 @@ validParameters = {
     "KernelLanguage":             [ "Assembly" ],
     "ISA":                        validISA,       # arch for assembly kernels
 
-    # Replaces assembly kernels if they are found in the directory Tensile/Tensile/ReplacementKernels
-    "ReplacementKernel":          [False, True],
-
     # Name of the custom kernel located in globalParameters["CustomKernelDirectory"].
     # a custom kernel is a user written assembly kernel with its associated configuration parameters included in a custom.config section
     # inside the yaml block between the --- and ... markers.  These parameters are only used for information purposes, not kernel generation.
@@ -1322,7 +1319,6 @@ defaultBenchmarkCommonParameters = [
     {"NonTemporalC":              [ 0 ] },
     {"NonTemporalA":              [ 0 ] },
     {"NonTemporalB":              [ 0 ] },
-    {"ReplacementKernel":         [ False ] },
     {"CustomKernelName":          [ "" ] },
     {"NoReject":                  [ False ]},
     {"MinVgprNumber":             [0]},

@@ -20,60 +20,7 @@
 ################################################################################
 
 from ..Component import LraTileAssignment
-from ..AsmUtils import inst, vgpr, sgpr, vectorStaticDivideAndRemainder, vectorStaticDivide, staticMultiply, vectorStaticRemainder
-
-class LraTileAssignmentVALU(LraTileAssignment):
-    kernel = {"EnableMatrixInstruction": False}
-
-    """
-    Local Read Addresses: Tile Assignment
-    """
-    def __call__(self, writer, kernel, tP):
-        kStr = ""
-
-        # allocate resources
-        qReg    = writer.vgprPool.checkOut(1,"qReg") # quotient
-        rReg    = writer.vgprPool.checkOut(1,"rReg") # remainder
-        tmpVgpr = writer.vgprPool.checkOutAligned(2,2,"tmpVgpr")
-        tmpSgpr = writer.getTmpSgpr(1).idx()
-
-        if tP["tileIdx"] == 0:
-            kStr += "%slr%s = serial %% SG%s%s%s" \
-                    % (writer.commentPrefix, tP["tileChar"], tP["tileChar"], \
-                    writer.commentSuffix, writer.endLine)
-
-            # constant
-            dividendReg = "Serial" # local serial
-            divisor = kernel["SubGroup0"]
-
-            # generate instruction
-            kStr += vectorStaticDivideAndRemainder(qReg, rReg, dividendReg, divisor, tmpVgpr, tmpSgpr)
-
-            # release and return resource
-            tP["gpr"]["lro"] = rReg
-            writer.tmplro = qReg
-        else:
-            kStr += "%slr%s = (serial / SG%s) %% SG%s%s%s" \
-                    % (writer.commentPrefix, tP["tileChar"], tP["tileChar"], \
-                    tP["tileChar"], writer.commentSuffix, writer.endLine)
-
-            # constant
-            divisor = kernel["SubGroup1"]
-            dividendReg = writer.tmplro
-
-            # generate instruction
-            kStr += vectorStaticDivideAndRemainder(qReg, rReg, dividendReg, divisor, tmpVgpr, tmpSgpr)
-
-            # release and return resource
-            tP["gpr"]["lro"] = rReg
-
-            writer.vgprPool.checkIn(writer.tmplro) # old
-            writer.vgprPool.checkIn(qReg)
-
-        writer.vgprPool.checkIn(tmpVgpr)
-
-        return kStr
-
+from ..AsmUtils import inst, vgpr, sgpr, vectorStaticDivide, staticMultiply, vectorStaticRemainder
 
 class LraTileAssignmentMFMA(LraTileAssignment):
     kernel = {"EnableMatrixInstruction": True}

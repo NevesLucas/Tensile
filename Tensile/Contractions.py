@@ -20,6 +20,7 @@
 ################################################################################
 
 from .Activation import ActivationType
+from .Common import printExit
 from .DataType import DataType
 from . import Hardware
 from . import Properties
@@ -373,7 +374,7 @@ class ProblemPredicate(Properties.Predicate):
            ("EnableMatrixInstruction" in state and state["EnableMatrixInstruction"] is True):
             rv += [cls("ArithmeticUnitCompatible", value="MFMA")]
         else:
-            rv += [cls("ArithmeticUnitCompatible", value="VALU")]
+            printExit("TensileLite does not support VALU.")
 
         # if bufferload is performed, we output some predication info for host side,
         # to prevent from some extremely large problems from launching and causing bufferload offset limit < 2^32

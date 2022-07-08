@@ -314,7 +314,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # Assign GRPM and LWPM
       #####
       # HOW THIS WORK
-      # padding each globalReadInstruction to 100 with empty instruction, 
+      # padding each globalReadInstruction to 100 with empty instruction,
       # each mfma will schedule intructions GRPM*100 times from padded globalReadInstruction.
       #   Ex. GRPM = 0.5
       #        GR ---------99--------- GR --------99---------- GR
@@ -322,7 +322,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.numGlobalReadInsPerMfma = roundUp(kernel["GlobalReadPerMfma"]*PRECISION)
 
       # HOW THIS WORK
-      # padding each globalReadInstruction to 100 with empty instruction, 
+      # padding each globalReadInstruction to 100 with empty instruction,
       # each mfma will schedule intructions GRPM*100 times from padded globalReadInstruction.
       #   Ex. LWPM = 0.5
       #        LW ---------99--------- LW --------99---------- LW
@@ -398,10 +398,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["StoreCInUnroll"]:
         numMfmaBetweenLWandBarrier = min(numMfmaBetweenLWandBarrier, 1)
       self.lwEndMfmaIndex = max(self.barrierMfmaIndex - numMfmaBetweenLWandBarrier,0) if self.numItersPLR else numMfmaPerIter*kernel["LoopIters"] - 1
-      # adjust lwEndMfmaIndex for the following cases 
+      # adjust lwEndMfmaIndex for the following cases
       #  1) PGR=2 + DirectToVgpr(DTV)
       #  2) last loop and StoreCInUnrollPostLoop enabled case
-      # In these cases, lwEndMfmaIndex needs to be < numMfmaPerIter * (kernel["LoopIters"] - 1) 
+      # In these cases, lwEndMfmaIndex needs to be < numMfmaPerIter * (kernel["LoopIters"] - 1)
       # to schedule global read for DTV after lwEndMfmaIndex or execute PostLoop after StoreC in NoLoadLoop
       # kernel["LoopIters"]  has to be > 1 to make this logic work.
       if kernel["LoopIters"] > 1 and \
@@ -2062,7 +2062,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
             lastuIdx = (isOptNLL or self.enableSingleNLLOpt) and not isNGLL # do not apply lastuIdx for not isOptNLL case
           macIterCode.addCode(self.mfmaIter(kernel, u, kernel["InnerUnroll"], vregSetIdxMFMA,lastuIdx))
         else:
-          macIterCode.addCode(self.macIter(kernel, luIdx, kernel["InnerUnroll"], True ))
+          printExit("TensileLite does not support MAC instructions.")
 
       subIterCode = self.makeSubIterSchedule(kernel, localReads, \
                       u, pointerLWCode, pointerLRCode, waitCode, macIterCode, waitLWCode, syncCode, pack[luIdx], isDTVodd, NLLlast)
@@ -2581,7 +2581,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           vregSetIdxMFMA = lc
           macIterCode.addCode(self.mfmaIter(kernel, u, kernel["InnerUnroll"], vregSetIdxMFMA, firstIter=firstIter and u == 0))
         else:
-          macIterCode.addCode(self.macIter(kernel, luIdx, kernel["InnerUnroll"], True ))
+          printExit("TensileLite does not support MAC instructions.")
 
       ###### unroll loop efficiency implementation######################################
       # unroll loop efficiency implementation
@@ -2607,142 +2607,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
             item.tempVgpr = None
         pack[luIdx] = Code.Module()
       else:
-        macIterCode = Code.Module()
-        MacitemsReorder = []
-        if self.enable["MAC"]:
-          luIdx = (u) % (self.numVgprBuffer+1) # local to use for MACs
-          macIterCode.addCode(self.macCode(kernel, luIdx, kernel["InnerUnroll"] ))
-        MacIteritems = macIterCode.flatitems()
-        #remove last and second entry from list if AggressiveMode is set
-        # re-insert them back later
-        if (kernel["AggressivePerfMode"]):
-          MacIteritems = MacIteritems[:-1]
-          MacIteritems.pop(1)
-        #print("number MacItems\n",len(MacIteritems))
-        blockWidth = tensorParametersA["localReadInstruction"].blockWidth
-        numVectorsPerTileA = (kernel["ThreadTile%u"%tensorParametersA["tensorIdx"]]/kernel["VectorWidth"])
-        numReadsPerVectorA = (kernel["VectorWidth"] * tensorParametersA["bpe"] ) / (blockWidth*4)
-        numVectorsPerTileB = (kernel["ThreadTile%u"%tensorParametersB["tensorIdx"]]/kernel["VectorWidth"])
-        TotalnumLdsFetches = numVectorsPerTileA*numReadsPerVectorA + numVectorsPerTileB*numReadsPerVectorA
-        ## Rules for applying kernel["UnrollLoopEfficiencyEnable"]
-        ## if A+B fetches <= 3 no split approach
-        if not TotalnumLdsFetches > 3:
-          subIterCode = self.makeSubIterSchedule(kernel, localReads, \
-                       u, pointerLWCode, pointerLRCode, waitCode, macIterCode)
-          kl.append(subIterCode) # add scheduled "other", local reads, local writes
-        else:
-          if ((kernel["ThreadTile0"] == 6 and kernel["ThreadTile1"] == 4) or
-             (kernel["ThreadTile0"] == 4 and kernel["ThreadTile1"] == 6)):
-            numGroups = 2   #group0 = 8 MAC(s)  #group1 = 16 MAC(s) (6x4 - 4x2)
-            # ldsItems for splitting lds(s)
-            ldsItems = ([[4,2],[2,2]]) if kernel["ThreadTile0"] == 6 else ([[2,4],[2,2]])
-            macItems = [8,16]
-            waitCntItems = [0,0]
-          elif (kernel["ThreadTile0"] == 4 and kernel["ThreadTile1"] == 4):
-            numGroups = 2   #group0 = 8 MAC(s)  #group1 = 8  MAC(s) 2)
-            ldsItems = ([[4,2],[0,2]])
-            macItems = [8,8]
-            waitCntItems = [0,0]
-          elif (kernel["ThreadTile0"] == 6 and kernel["ThreadTile1"] == 6):
-            numGroups = 2   #group0 = 8 MAC(s)  #group1 = 16 MAC(s) 2)
-            ldsItems = ([[4,4],[2,2]])
-            macItems = [16,20]
-            waitCntItems = [0,0]
-          elif ((kernel["ThreadTile0"] == 8 and kernel["ThreadTile1"] == 4) or
-             (kernel["ThreadTile0"] == 4 and kernel["ThreadTile1"] == 8)):
-            numGroups = 2   #group0 = 16 MAC(s)  #group1 = 16 MAC(s) 2)
-            ldsItems = ([[4,4],[4,0]]) if kernel["ThreadTile0"] == 8 else ([[4,4],[0,4]])
-            macItems = [16,16]
-            waitCntItems = [0,0]
-          elif (kernel["ThreadTile0"] == 8 and kernel["ThreadTile1"] == 8):
-            numGroups = 2   #group0 = 8 MAC(s)  #group1 = 8 MAC(s) 2)
-            #ldsItems = ([[4,4],[4,4]])
-            macItems = [16,48]
-            waitCntItems = [0,0]
-          AitemsToReorder = localReadsA.flatitems()
-          BitemsToReorder = localReadsB.flatitems()
-          ##reorder code?? based on LDS fetch
-          ## works for 2 groups.. needs fix for more than 2 groups
-          for iter in range(0,numGroups):
-            endIdx   = ldsItems[iter][0] if iter == 0 else kernel["ThreadTile%u"%tensorParametersA["tensorIdx"]]
-            startIdx = 0  if iter == 0 else ldsItems[iter-1][1]
-            for Bitems in range(startIdx, startIdx+ldsItems[iter][1]):
-              for Aitems in range(0, endIdx):
-                idx = Aitems+(kernel["ThreadTile%u"%tensorParametersA["tensorIdx"]]*Bitems)
-                MacitemsReorder.append(MacIteritems[idx])
-              if (iter != 0):
-                for Bitems in range(0, ldsItems[iter-1][1]):
-                  for Aitems in range(ldsItems[iter-1][0], kernel["ThreadTile%u"%tensorParametersA["tensorIdx"]]):
-                     MacitemsReorder.append(MacIteritems[Aitems+((kernel["ThreadTile%u"%tensorParametersA["tensorIdx"]])*Bitems)])
-          #print("Total number mac items A(%u)\n",len(MacitemsReorder))
-          #print("Total number ds items A(%u)\n"%(TotalnumLdsFetches))
-          #print("number ds items A_B(%u .. %u)\n"%(len(AitemsToReorder),len(BitemsToReorder)))
-          #reorder LDS fetches so order in which A+B fetches matches MAC blob
-          #e.g 8x4 original order in DGEMM case A[0-1]A[2-3]A[4-5]A[6-7]B[0-1][2-3]
-          #we want to re-order them into A[0-1][2-3]B[0-1]B[2-3];  In all other except
-          #DGEMM type, number of LDS fetches <=4 so no need for LDS re-order
-          if self.enable["LocalRead"] and TotalnumLdsFetches > 4:
-            localReads = Code.Module()
-            for iter in range(0,numGroups):
-              if len(AitemsToReorder):
-                localReads.addText(self.comment("local read a"))
-                numLocalReads = roundUp((ldsItems[iter][0])/kernel["VectorWidth"])
-                ##print("number ds items A(%u..%u)\n"%(iter,numLocalReads))
-                for idx in range(0,numLocalReads):
-                  localReads.addCode(AitemsToReorder[0])
-                  AitemsToReorder = AitemsToReorder[1:]
-              if len(BitemsToReorder):
-                numLocalReads = roundUp(ldsItems[iter][1]/kernel["VectorWidth"])
-                ##print("number ds items B(%u..%u)\n"%(iter,numLocalReads))
-                localReads.addText(self.comment("local read b"))
-                for items in range(0,numLocalReads):
-                  localReads.addCode(BitemsToReorder[0])
-                  BitemsToReorder = BitemsToReorder[1:]
-              if iter == 0:
-                waitCntItems[iter] = TotalnumLdsFetches - ((ldsItems[iter][0])/kernel["VectorWidth"] + (ldsItems[iter][1])/kernel["VectorWidth"])
-              elif iter+1 != numGroups:
-                waitCntItems[iter] = TotalnumLdsFetches - ((ldsItems[iter][0])/kernel["VectorWidth"] + (ldsItems[iter][1])/kernel["VectorWidth"] + waitCntItems[iter-1])
-              else:
-                waitCntItems[iter] = 0
-              #print("Waitcnt(%u..%u)\n"%(iter,waitCntItems[iter]))
-          for iter in range(0,numGroups):
-            #Mac Code
-            #place holder for future work Instruction class for generting MAC instruction
-            #FMAInstruction = MacInstruction(globalParameters["CurrentISA"])
-            subIterCode = Code.Module()
-            waitCode = Code.Module()
-            macIterCodeGrp = Code.Module()
-            doOnce = False
-            if self.enable["MAC"]:
-              numMacItems = macItems[iter]
-              for Items in range(0,numMacItems):
-                macItem = MacitemsReorder.pop(0)
-                macIterCodeGrp.addCode(macItem)
-                ## add s_setprio 1 when AggressivePerfMode ==1 as second instruction for second-last blob macCode
-                if (kernel["AggressivePerfMode"] and not doOnce):
-                    macIterCodeGrp.addInst("s_setprio ","1","Raise priority while processing macs")
-                    doOnce = True
-              ## add s_setprio 0 when AggressivePerfMode ==1 as last instruction
-              if (kernel["AggressivePerfMode"]):
-                macIterCodeGrp.addInst("s_setprio ","0","Reset priority after macs")
-            #print("ReadWaitcnt(%u..%u)\n"%(iter,waitCntItems[iter]))
-            #print("WriteCodeCount(%d..%u)\n",u,self.perIterLocalWriteCode[u].count())
-            if (iter == 0):
-              if self.enable["Wait"]:
-                #calculate lgkmcnt value including read+write for first iteration
-                waitCntVal = waitCntItems[iter] + 1 if (self.perIterLocalWriteCode[u].count()>0) else waitCntItems[iter]
-                # read + write instructions lgkmcnt (1=> for write)
-                # build waitCnt using new lgkmcnt
-                waitCode = Code.WaitCnt(self.version, waitCntVal,-1,"wait for prior local read")
-              subIterCode = self.makeSubIterSchedule(kernel, localReads, \
-                       u, pointerLWCode, pointerLRCode, waitCode, macIterCodeGrp)
-            else:
-                #last group only pointer + localWrite Code
-              if self.enable["Wait"]:
-                waitCode = Code.WaitCnt(self.version, waitCntItems[iter],-1,"wait for prior local read & local writes")
-              subIterCode.addCode(waitCode)
-              subIterCode.addCode(macIterCodeGrp)
-            kl.append(subIterCode) # add scheduled "other", local reads, local writes
+        printExit("TensileLite does not support MAC instructions.")
     kl.append(self.closeString(kernel))
     kl.append(self.openString(kernel))
 
@@ -3238,7 +3103,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                 vregSetIdxMFMA = 0
                 kl.append(self.mfmaIter(kernel, 0, tailLoopInnerUnroll, vregSetIdxMFMA, False, True))
               else:
-                kl.append(self.macIter(kernel, 0, tailLoopInnerUnroll, True, True))
+                printExit("TensileLite does not support MAC instructions.")
 
             finalLoop = mValue == mEnd - 1
             kl.append(self.closeLoop(kernel, -1, finalLoop, uDu if kernel.enabledSplitLDS else None))
@@ -3596,7 +3461,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["DepthU"] // kernel["MatrixInstK"] <= 2 and self.lrvwA > 1:
         # need to double vgprValu to avoid local read overwritting vgprValu registers
         self.vgprValuDouble = True
- 
+
     # Wider LocalRead
     if kernel["EnableMatrixInstruction"]:
       self.numReadsIterCoalescedA = self.lrvwA // kernel["MIInputPerThread"]
@@ -4339,14 +4204,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   @abc.abstractmethod
   def endSummation(self, kernel, label = None, isOptNLL = False):
-    return ""
-  
-  ##############################################################################
-  # MAC Iteration
-  # useMacro : if true, call the MAC* macro. If False, inline the MACs
-  ##############################################################################
-  @abc.abstractmethod
-  def macIter(self, kernel, bufferIdx, iuiCount, useMacro, isTail=False):
     return ""
 
   ##############################################################################
@@ -5172,7 +5029,7 @@ for codeObjectFileName in codeObjectFileNames:
                 localWriteStr = ' '.join([str(x) for x in self.perIterLocalWriteCode[i].flatitems()])
                 numGlobalStoreC += localWriteStr.count("_buffer_store")
                 numGlobalStoreC += localWriteStr.count("buffer_atomic_add")
-              # no LDS write (DirectToLds+DirectToVgpr) and not beforeBarrier and not firstIter case, 
+              # no LDS write (DirectToLds+DirectToVgpr) and not beforeBarrier and not firstIter case,
               # no need to wait for StoreC in previous iteration
               # Then, add the number of storeC in template
               #if kernel["NoLdsWriteCode"] and not firstIter:

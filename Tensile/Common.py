@@ -542,16 +542,6 @@ validParameters = {
     # 2 = interleave two stores after required macs have completed execution
     "OptNoLoadLoop":               [0, 1, 2],
 
-    # Prefetch across persistent kernel iterations - the no-load-loop computes the
-    # tile assignment and next global read offset and launches the buffer loads for
-    # the next tile in the sequence.
-    "PrefetchAcrossPersistent":    [0, 1],
-
-    # Changes the behaviour of prefetch across persistent.
-    # Mode 0 is default, works for all sizes
-    # Mode 1 disables static tile setup for prefetch and merges prefetch with ord. noLoadLoop,
-    "PrefetchAcrossPersistentMode": [0, 1],
-
     "BufferLoad":                 [ False, True ],
     "BufferStore":                [ False, True ],
 
@@ -904,7 +894,7 @@ validParameters = {
     # Enable this feature when PK is enabled
     # Enable this feature when you have 2 or More Tiles/CU
     # disable StoreSyncOpt, StorePriorityOpt,GroupLoadStore feature when this feature is enabled
-    # enable PersistentKernel , PrefetchAcrossPersistent
+    # enable PersistentKernel
     "StoreCInUnroll":             [False, True],
     #
     # StoreCInUnrollInterval is to specify the MFMA interval between 2 StoreC/AtomicAdd.
@@ -1212,8 +1202,6 @@ defaultBenchmarkCommonParameters = [
 
     {"InterleaveAlpha":           [ 0 ] },
     {"OptNoLoadLoop":             [ 1 ] },
-    {"PrefetchAcrossPersistent":  [ 0 ] },
-    {"PrefetchAcrossPersistentMode": [ 0 ] },
 
     {"BufferLoad":                [ True ] },
     {"BufferStore":               [ True ] },

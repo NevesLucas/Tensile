@@ -1629,12 +1629,6 @@ class Solution(collections.abc.Mapping):
       reject(state, "DirectToLds%c does not supports NumLoadsCoalesced%c > 1 for zgemm"%(tc, tc))
       return False
 
-    # Does not work with PAPMode 1 and AssertSummationElementMultiple % (DepthU * 2) != 0
-    # This is because DirectToLds use second LDS buffer after Odd exit. It does not match local read at the beginning of PK loop.
-    if state["PrefetchAcrossPersistentMode"] == 1 and state["AssertSummationElementMultiple"] % (state["DepthU"] * 2) != 0:
-      reject(state, "DirectToLds%c does not work with PAPMode 1 and AssertSummationElementMultiple is not multiple of (DepthU * 2)"%(tc))
-      return False
-
     # Does not work with PrefetchGlobalRead=2 and PrefetchLocalRead=1 (cannot schedule DTL global read after local read)
     if state["PrefetchGlobalRead"] == 2 and state["PrefetchLocalRead"] == 1:
       reject(state, "DirectToLds%c does not work with PrefetchGlobalRead=2 and PrefetchLocalRead=1"%(tc))
@@ -1817,21 +1811,6 @@ class Solution(collections.abc.Mapping):
       print2("PersistentKernelAlongBatch not support GSU on HIP, forcing PersistentKernelAlongBatch = False")
       state["PersistentKernelAlongBatch"] = False
 
-    if state["PrefetchAcrossPersistent"]:
-      if state["KernelLanguage"] == "Source" or \
-         state["PersistentKernel"] == 0 or \
-         state["PrefetchGlobalRead"] == 0 or \
-         state["SuppressNoLoadLoop"]:
-        print2("PAP requires Assembly, PK!=0, PGR!=0, SuppressNoLoadLoop=True, forcing PAP=False")
-        state["PrefetchAcrossPersistent"] = False
-      if state["PrefetchAcrossPersistentMode"] == 0 and state["PrefetchGlobalRead"] == 2:
-        reject(state, "PAPMode 0 does not support PGR=2")
-        return
-    else:
-      if state["PrefetchAcrossPersistentMode"] != 0:
-        reject(state, "PAPMode requires PrefetchAcrossPersistent enabled")
-        return
-
     problemType = state["ProblemType"]
     if not problemType["UseInitialStridesAB"]:
       for (tc) in ('A','B'):
@@ -1930,9 +1909,7 @@ class Solution(collections.abc.Mapping):
 
     # Can optimize preLoop LW Vmcnt only when PAP, BufferLoad
     # TODO- less restriction? Haven't tested for not BufferLoad
-    state["OptPreLoopVmcnt"] = state["OptPreLoopVmcnt"] and \
-                               state["PrefetchAcrossPersistent"] and \
-                               bufferLoad
+    state["OptPreLoopVmcnt"] = state["OptPreLoopVmcnt"] and False and bufferLoad
 
     #print("PackedC0IdxChars", state["PackedC0IdxChars"])
     #print("PackedC1IdxChars", state["PackedC1IdxChars"])
@@ -2447,20 +2424,12 @@ class Solution(collections.abc.Mapping):
       invalidComment = "does not support TLUA=False and TLUB=False"
     # NoTailLoop parameter initialization. Set True for the following cases
     #  1. ASEM is multiple of DepthU. TailLoop code will not be used in this case.
-    #  2. PrefetchAcrossPersistent and PrefetchAcrossPersistentMode
-    #    PrefetchAcrossPersistentMode does not support TailLoop (TLU is necessary for NoTailLoop)
-    #  3. DirectToVgpr is enabled
+    #  2. DirectToVgpr is enabled
     # Except for case 1, validNoTailLoop should be True to enable NoTailLoop.
     # Otherwise, it will be rejected.
     state["NoTailLoop"] = False
     if state["AssertSummationElementMultiple"] % state["DepthU"] == 0:
       state["NoTailLoop"] = True
-    elif state["PersistentKernel"] and state["PrefetchAcrossPersistent"] and state["PrefetchAcrossPersistentMode"] == 1:
-      if not validNoTailLoop:
-        reject(state, "PAP + PAPMode + AssertSummationElementMultiple%%DepthU!=0 %s to enable NoTailLoop"%invalidComment)
-        return
-      else:
-        state["NoTailLoop"] = True
     elif state["DirectToVgprA"] or state["DirectToVgprB"]:
       if not validNoTailLoop:
         reject(state, "DirectToVgpr + AssertSummationElementMultiple%%DepthU!=0 %s to enable NoTailLoop"%invalidComment)
@@ -2852,12 +2821,6 @@ class Solution(collections.abc.Mapping):
         return
       if not state["PersistentKernel"]:
         reject(state, "StoreCInUnroll requires PersistentKernel feature")
-        return
-      if not state["PrefetchAcrossPersistent"]:
-        reject(state, "StoreCInUnroll requires PrefetchAcrossPersistent feature")
-        return
-      if state["PrefetchAcrossPersistentMode"] == 0:
-        reject(state, "StoreCInUnroll requires PrefetchAcrossPersistentMode")
         return
       if state["ProblemType"]["DataType"].isDouble() and state["VectorWidth"] != 2:
         reject(state, "StoreCInUnroll requires VectorWidth=2 for dgemm")

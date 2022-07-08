@@ -89,12 +89,8 @@ class ComputeStoreVgprsMFMA(ComputeStoreVgprs):
         kStr += staticMultiply(vgpr(tid0), vgpr(tid0), kernel["MIOutputVectorWidth"], sgpr(tmpSgpr), "thread0 * continuous_output")
         kStr += inst("_v_add_u32", vgpr(tid0), vgpr(tmpVgpr0), vgpr(tid0), "coordination 0 = wave_id0 + tid0")
 
-        if writer.prefetchAcrossPersistent:
-            wg0="PrevWorkGroup0"
-            wg1="PrevWorkGroup1"
-        else:
-            wg0="WorkGroup0"
-            wg1="WorkGroup1"
+        wg0="WorkGroup0"
+        wg1="WorkGroup1"
 
         # macro tile 0 part
         kStr += inst("s_mul_i32", sgpr(tmpSgpr), kernel["MacroTile0"], sgpr(wg0), "wgp0 * MT0")
@@ -196,12 +192,8 @@ class ComputeStoreVgprsMFMASwap(ComputeStoreVgprs):
         kStr += vectorStaticRemainder(dummy, tmpVgpr0, "Serial", matrixInstM, tmpVgpr1, tmpSgpr)
         kStr += inst("_v_add_lshl_u32", vgpr(tid0), vgpr(tmpVgpr0), vgpr(tid0), log2(kernel["VectorWidth"]), "coordination 0 = wave_id0 + tid0")
 
-        if writer.prefetchAcrossPersistent:
-            wg0="PrevWorkGroup0"
-            wg1="PrevWorkGroup1"
-        else:
-            wg0="WorkGroup0"
-            wg1="WorkGroup1"
+        wg0="WorkGroup0"
+        wg1="WorkGroup1"
 
         # macro tile 0 part
         kStr += inst("s_mul_i32", sgpr(tmpSgpr), kernel["MacroTile0"], sgpr(wg0), "wgp0 * MT0")

@@ -133,7 +133,7 @@ class ShiftVectorComponentsMFMA(ShiftVectorComponents):
         tmpVgpr = writer.vgprPool.checkOutAligned(2,2)
         dummy   = writer.vgprPool.checkOut(1)
         wgMT    = writer.vgprPool.checkOut(1)
-        wg      = tP["prevWg"] if writer.prefetchAcrossPersistent else tP["wg"]
+        wg      = tP["wg"]
 
         # get M size of edge block
         mtReg = writer.vgprPool.checkOut(1)

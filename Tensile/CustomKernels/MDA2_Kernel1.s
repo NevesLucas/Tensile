@@ -96,7 +96,6 @@ custom.config:
   OptNoLoadLoop: 1
   OptPreLoopVmcnt: False
   PersistentKernel: 0
-  PrefetchAcrossPersistent: 0
   PrefetchGlobalRead: 1
   PrefetchLocalRead: 1
   ScheduleIterAlg: 1

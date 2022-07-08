@@ -1051,26 +1051,24 @@ class Solution(collections.abc.Mapping):
     if totalVectors < state["NumThreads"]:
       # Try to reduce size of vector so every thread has a load to do
       pv = state["NumThreads"]//totalVectors
-      if not state["FractionalLoad"]:
-        if state["NumThreads"] % totalVectors != 0:
-          reject(None, "NumThreads %u %% totalVectors %u != 0" \
-              % (state["NumThreads"], totalVectors))
-          validDepthU = False
-        if pv * totalVectors != state["NumThreads"]:
-          reject(None, "pv %u * totalVectors %u != NumThreads %u" \
-              % (pv, totalVectors, state["NumThreads"]))
-          validDepthU = False
-        if grvw % pv != 0:
-          reject(None, "GlobalReadVectorWidth %u %% pv %u != 0" \
-              % (grvw, pv))
-          validDepthU = False
+      if state["NumThreads"] % totalVectors != 0:
+        reject(None, "NumThreads %u %% totalVectors %u != 0" \
+            % (state["NumThreads"], totalVectors))
+        validDepthU = False
+      if pv * totalVectors != state["NumThreads"]:
+        reject(None, "pv %u * totalVectors %u != NumThreads %u" \
+            % (pv, totalVectors, state["NumThreads"]))
+        validDepthU = False
+      if grvw % pv != 0:
+        reject(None, "GlobalReadVectorWidth %u %% pv %u != 0" \
+            % (grvw, pv))
+        validDepthU = False
     else:
       pv = 1 # no partial vector required
       if totalVectors % state["NumThreads"] != 0:
-        if not state["FractionalLoad"]:
-          reject(None, "totalVectors %u %% NumThreads %u != 0" \
-              % (totalVectors, state["NumThreads"]))
-          validDepthU = False
+        reject(None, "totalVectors %u %% NumThreads %u != 0" \
+            % (totalVectors, state["NumThreads"]))
+        validDepthU = False
 
     state["GlobalLoadVectorWidth%s"%tc] = grvw//pv
 
@@ -1424,8 +1422,6 @@ class Solution(collections.abc.Mapping):
     # check can we use WaveSeparateGlobalRead
     numOfWaves = state["NumThreads"] // state["WavefrontSize"]
     if state["WaveSeparateGlobalRead%s"%tc]:
-      if state["FractionalLoad"] != 0:
-        reject(state, "didn't support WaveSeparateGlobalRead with FractionalLoad(%u) != 0" % state["FractionalLoad"])
       if state["LocalDotLayout"]>1:
         reject(state, "didn't support WaveSeparateGlobalRead when LocalDotLayout(%u) > 1" % state["LocalDotLayout"])
       if state["ProblemType"]["TLU%s"%tc] and (state["DepthU"] > 0) and (state["DepthU"] % numOfWaves != 0):
@@ -1909,7 +1905,6 @@ class Solution(collections.abc.Mapping):
     if not bufferLoad:
       state["DirectToLds"] = False
       state["_UseSgprForGRO"] = False
-      state["FractionalLoad"] = False
       if state["PrefetchGlobalRead"] == 2:
         reject(state, "BufferLoad=0 does not support PrefetchGlobalRead=2")
         return
@@ -2188,57 +2183,51 @@ class Solution(collections.abc.Mapping):
       totalElementsA = totalElementsCoalescedA * totalElementsPerpA
       totalElementsB = totalElementsCoalescedB * totalElementsPerpB
 
-      if state["FractionalLoad"]:
-        if not Solution.setGlobalLoadTileDimFractional(state, "A", depthU):
-          validDepthU = False
-        if not Solution.setGlobalLoadTileDimFractional(state, "B", depthU):
-          validDepthU = False
-      else:
-        GlobalReadVectorWidth = state["GlobalReadVectorWidth"]
-        if state["DirectToVgprA"]:
-          if not state["SourceSwap"]:
-            GlobalReadVectorWidth = 1 # adjust GlobalReadVectorWidth to 1 in DirectToVgpr case (except for DirectToVgprA + SourceSwap)
-        tva = totalElementsA // GlobalReadVectorWidth
-        if not Solution.setGlobalLoadVectorWidth(state, "A", tva, GlobalReadVectorWidth):
-          validDepthU = False
-        GlobalReadVectorWidth = state["GlobalReadVectorWidth"]
-        tvb = totalElementsB // GlobalReadVectorWidth
-        if not Solution.setGlobalLoadVectorWidth(state, "B", tvb, GlobalReadVectorWidth):
-          validDepthU = False
+      GlobalReadVectorWidth = state["GlobalReadVectorWidth"]
+      if state["DirectToVgprA"]:
+        if not state["SourceSwap"]:
+          GlobalReadVectorWidth = 1 # adjust GlobalReadVectorWidth to 1 in DirectToVgpr case (except for DirectToVgprA + SourceSwap)
+      tva = totalElementsA // GlobalReadVectorWidth
+      if not Solution.setGlobalLoadVectorWidth(state, "A", tva, GlobalReadVectorWidth):
+        validDepthU = False
+      GlobalReadVectorWidth = state["GlobalReadVectorWidth"]
+      tvb = totalElementsB // GlobalReadVectorWidth
+      if not Solution.setGlobalLoadVectorWidth(state, "B", tvb, GlobalReadVectorWidth):
+        validDepthU = False
 
-        if state["EnableMatrixInstruction"] and state["GlobalLoadVectorWidthA"]:
-          partialA = state["ProblemType"]["TLUA"] and (state["AssertFree0ElementMultiple"] % state["GlobalLoadVectorWidthA"] != 0)
-          if partialA:
-            glvwAlimit = 16 // state["ProblemType"]["DataType"].numBytes()
-            if state["SourceSwap"]:
-              matrixInstM = (state["MatrixInstM"] * state["MatrixInstBM"]) if (state["MatrixInstM"] == 4) else state["MatrixInstM"]
-              glvwAlimit = matrixInstM * state["VectorWidth"]
-            else:
-              matrixInstN = (state["MatrixInstN"] * state["MatrixInstBN"]) if (state["MatrixInstN"] == 4) else state["MatrixInstN"]
-              glvwAlimit  = state["MIOutputVectorWidth"] * (state["WavefrontSize"] // matrixInstN)
+      if state["EnableMatrixInstruction"] and state["GlobalLoadVectorWidthA"]:
+        partialA = state["ProblemType"]["TLUA"] and (state["AssertFree0ElementMultiple"] % state["GlobalLoadVectorWidthA"] != 0)
+        if partialA:
+          glvwAlimit = 16 // state["ProblemType"]["DataType"].numBytes()
+          if state["SourceSwap"]:
+            matrixInstM = (state["MatrixInstM"] * state["MatrixInstBM"]) if (state["MatrixInstM"] == 4) else state["MatrixInstM"]
+            glvwAlimit = matrixInstM * state["VectorWidth"]
+          else:
+            matrixInstN = (state["MatrixInstN"] * state["MatrixInstBN"]) if (state["MatrixInstN"] == 4) else state["MatrixInstN"]
+            glvwAlimit  = state["MIOutputVectorWidth"] * (state["WavefrontSize"] // matrixInstN)
 
-            # reduce GLVA if GLVA larger than MIOVW
-            if state["GlobalLoadVectorWidthA"] > glvwAlimit:
-              tva = totalElementsA // glvwAlimit
-              if not Solution.setGlobalLoadVectorWidth(state, "A", tva, glvwAlimit):
-                validDepthU = False
+          # reduce GLVA if GLVA larger than MIOVW
+          if state["GlobalLoadVectorWidthA"] > glvwAlimit:
+            tva = totalElementsA // glvwAlimit
+            if not Solution.setGlobalLoadVectorWidth(state, "A", tva, glvwAlimit):
+              validDepthU = False
 
-        if state["EnableMatrixInstruction"] and state["GlobalLoadVectorWidthB"]:
-          partialB = state["ProblemType"]["TLUB"] and (state["AssertFree1ElementMultiple"] % state["GlobalLoadVectorWidthB"] != 0)
-          if partialB:
-            glvwBlimit = 16 // state["ProblemType"]["DataType"].numBytes()
-            if state["SourceSwap"]:
-              matrixInstM = (state["MatrixInstM"] * state["MatrixInstBM"]) if (state["MatrixInstM"] == 4) else state["MatrixInstM"]
-              glvwBlimit  = state["MIOutputVectorWidth"] * (state["WavefrontSize"] // matrixInstM)
-            # else:  # use origin shiftptr for B
-            #   matrixInstN = (state["MatrixInstN"] * state["MatrixInstBN"]) if (state["MatrixInstN"] == 4) else state["MatrixInstN"]
-            #   glvwBlimit = matrixInstN # not support state["VectorWidth"] for B yet
+      if state["EnableMatrixInstruction"] and state["GlobalLoadVectorWidthB"]:
+        partialB = state["ProblemType"]["TLUB"] and (state["AssertFree1ElementMultiple"] % state["GlobalLoadVectorWidthB"] != 0)
+        if partialB:
+          glvwBlimit = 16 // state["ProblemType"]["DataType"].numBytes()
+          if state["SourceSwap"]:
+            matrixInstM = (state["MatrixInstM"] * state["MatrixInstBM"]) if (state["MatrixInstM"] == 4) else state["MatrixInstM"]
+            glvwBlimit  = state["MIOutputVectorWidth"] * (state["WavefrontSize"] // matrixInstM)
+          # else:  # use origin shiftptr for B
+          #   matrixInstN = (state["MatrixInstN"] * state["MatrixInstBN"]) if (state["MatrixInstN"] == 4) else state["MatrixInstN"]
+          #   glvwBlimit = matrixInstN # not support state["VectorWidth"] for B yet
 
-            # reduce GLVB if GLVB larger than MIOVW
-            if state["GlobalLoadVectorWidthB"] > glvwBlimit:
-              tvb = totalElementsB // glvwBlimit
-              if not Solution.setGlobalLoadVectorWidth(state, "B", tvb, glvwBlimit):
-                validDepthU = False
+          # reduce GLVB if GLVB larger than MIOVW
+          if state["GlobalLoadVectorWidthB"] > glvwBlimit:
+            tvb = totalElementsB // glvwBlimit
+            if not Solution.setGlobalLoadVectorWidth(state, "B", tvb, glvwBlimit):
+              validDepthU = False
 
       if validDepthU and state["KernelLanguage"] == "Assembly" \
         and (state["ProblemType"]["DataType"].isHalf() \
@@ -2284,21 +2273,20 @@ class Solution(collections.abc.Mapping):
       #    or state["GlobalLoadVectorWidthB"] == 1):
       #  validDepthU = False
 
-      if not state["FractionalLoad"]:
-        if userDepthU == -1: # no vectors
-          if state["GlobalLoadVectorWidthA"] != 1 \
-              or state["GlobalLoadVectorWidthB"] != 1:
-            validDepthU = False
-        elif userDepthU == -2:
-          if max( state["GlobalLoadVectorWidthA"], \
-              state["GlobalLoadVectorWidthB"]) \
-              < state["GlobalReadVectorWidth"]:
-            validDepthU = False
-        elif userDepthU <= -3:
-          if min( state["GlobalLoadVectorWidthA"], \
-              state["GlobalLoadVectorWidthB"]) \
-              < state["GlobalReadVectorWidth"]:
-            validDepthU = False
+      if userDepthU == -1: # no vectors
+        if state["GlobalLoadVectorWidthA"] != 1 \
+            or state["GlobalLoadVectorWidthB"] != 1:
+          validDepthU = False
+      elif userDepthU == -2:
+        if max( state["GlobalLoadVectorWidthA"], \
+            state["GlobalLoadVectorWidthB"]) \
+            < state["GlobalReadVectorWidth"]:
+          validDepthU = False
+      elif userDepthU <= -3:
+        if min( state["GlobalLoadVectorWidthA"], \
+            state["GlobalLoadVectorWidthB"]) \
+            < state["GlobalReadVectorWidth"]:
+          validDepthU = False
 
       if validDepthU:
         if not state["ProblemType"]["TLUA"]:
@@ -2348,13 +2336,12 @@ class Solution(collections.abc.Mapping):
         # not supported with PSD, has some interaction with iter
         state["StaggerU"] = 0
 
-    if not state["FractionalLoad"]:
-      if not Solution.setGlobalLoadTileDimClassic(state, "A", state["NumLoadsA"], \
-          totalVectorsCoalescedA, totalElementsPerpA):
-        return
-      if not Solution.setGlobalLoadTileDimClassic(state, "B", state["NumLoadsB"], \
-          totalVectorsCoalescedB, totalElementsPerpB):
-        return
+    if not Solution.setGlobalLoadTileDimClassic(state, "A", state["NumLoadsA"], \
+        totalVectorsCoalescedA, totalElementsPerpA):
+      return
+    if not Solution.setGlobalLoadTileDimClassic(state, "B", state["NumLoadsB"], \
+        totalVectorsCoalescedB, totalElementsPerpB):
+      return
 
     # allow LocalReadVectorWidth for TLU + MatrixInstruction
     # so far, limited to double + (DTVB or (DTVA + no DTL)) only
@@ -3105,8 +3092,6 @@ class Solution(collections.abc.Mapping):
     # (as opposed to using dedicated VGPR for each GRO
     # Requires preciseBounds check since we rely on the buffer bounds check, not
     # individual vector registers doing bounds compares.
-    if not bufferLoad and state["FractionalLoad"]:
-        reject(state, "Fractional requires BufferLoad")
 
     if state["_UseSgprForGRO"] == -1:
       # Don't use SGPR if it looks like we might not have enough - better to leave PBC enabled even if we have to use VGPR

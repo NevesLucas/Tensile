@@ -621,12 +621,6 @@ validParameters = {
     # -1 attempt to use a hueristic to determine when the tile size will use too many SGPR and fall back to VGPR
     "UseSgprForGRO":              [ -1, 0, 1],
 
-    # Some work-items in the group may not participate in the final buffer load.
-    # Allows more flexibility in choosing DepthU.
-    # 1= allocate extra addressing vpgr for edge cases
-    # 2= use temp vgpr inside unroll loop, may save 1 VPR if both A and B have a fractional edge but costs v_alu
-    "FractionalLoad":             [ 0, 1, 2] ,
-
     # Use a 64-bit shadow limit register to allow buffers larger than 2^32 bytes
     "Use64bShadowLimit":   [ True, False],
 
@@ -668,7 +662,6 @@ validParameters = {
     # Load optimizations:
     #  - For TLU=1 matrix, if AF1WM>=GLVW then can enable UseSgprForGRO
     #      - Reduces registers used for address calculations
-    #      - Enables FractionalLoad for more flexibility in address calcs
     #      - Removes address shift/unshift code
     #    - UseSgprForGRO will only be enabled if all matrices meet assertion requirements.
     #
@@ -1273,7 +1266,6 @@ defaultBenchmarkCommonParameters = [
     {"PackBatchDims":             [ 0 ] },
     {"PackFreeDims":              [ 1 ] },
     {"UnrollIncIsDepthU":         [ 0 ] },
-    {"FractionalLoad":            [ 0 ] },
     {"Use64bShadowLimit":         [ 1 ] },
     {"VectorAtomicWidth":         [ -1 ] },
     {"NumLoadsCoalescedA":        [ 1 ] },

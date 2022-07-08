@@ -537,11 +537,6 @@ class KernelWriterAssembly(KernelWriter):
       # product of all summation dimensions, this also will be divided if GSU is enabled
       self.defineSgpr("UnrollLoopLastIter", 1)
 
-    if kernel["FractionalLoad"] == 2:
-      if kernel["fractionalPerpOverhangA"]:
-        self.defineSgpr("PerpOverhangVccA", 2, 2)
-      if kernel["fractionalPerpOverhangB"]:
-        self.defineSgpr("PerpOverhangVccB", 2, 2)
     if self.use64bShadowLimit:
       # If need more SGPR could overlap this with the Tensor2dSize regs
       self.defineSgpr("ShadowLimitA", 2, 2)
@@ -1198,17 +1193,12 @@ class KernelWriterAssembly(KernelWriter):
     #numLocalWriteInstructionsA = numLocalWritesA \
     #    / self.localWriteInstructionA[self.instructionIdxNumOffsets]
     self.numVgprLocalWriteAddressesA = 0 if kernel["LocalWriteUseSgprA"] else 1 * self.rpla
-    # TODO - if we only have one local write - can just map the overhang register to the LWO
-    if kernel["FractionalLoad"]==1 and kernel["fractionalPerpOverhangA"]:
-      self.numVgprLocalWriteAddressesA += 1*self.rpla
 
     #numLocalWritesB = kernel["NumLoadsCoalescedB"] \
     #    * nlp * self.numWriteVectorComponentsB
     #numLocalWriteInstructionsB = numLocalWritesB \
     #    / self.localWriteInstructionB[self.instructionIdxNumOffsets]
     self.numVgprLocalWriteAddressesB = 0 if kernel["LocalWriteUseSgprB"] else 1 * self.rpla
-    if kernel["FractionalLoad"]==1 and kernel["fractionalPerpOverhangB"]:
-      self.numVgprLocalWriteAddressesB += 1*self.rpla
 
     # do not allocate local write address register if DirectToVgpr is enabled
     if kernel["DirectToVgprA"]:
@@ -3765,8 +3755,6 @@ class KernelWriterAssembly(KernelWriter):
   # tensor.  If so clip to the last legal value which is inside the array
   ##############################################################################
   def graShift(self, kernel, tP):
-    # FractionalLoad maps addresses in a different way?
-
     # graShift requires a vgpr for each address component (so each component
     # can be examined and shifted if necessary) - therefore does not work
     # with UseSgprForGRO.
@@ -3980,28 +3968,6 @@ class KernelWriterAssembly(KernelWriter):
         if (ldsInc != 0):
           kStr += inst("s_mov_b32", sgpr(tmpSgpr), ldsInc, "" )
           kStr += inst("_v_sub_u32", vgpr(groVgpr), vgpr(groVgpr), sgpr(tmpSgpr), "sub offset for buffer_load instoffset")
-
-      if kernel["BufferLoad"] and kernel["FractionalLoad"]:
-        lastValidThread = kernel[tP["lsc"]]*kernel[tP["lsp"]]//tP["glvw"]
-        if lastValidThread < kernel["NumThreads"]:
-          kStr += "// Offset only valid for %u/%u threads inside the PerLoadTile\n" \
-               % (lastValidThread, kernel["NumThreads"])
-          kStr += inst("s_mov_b32", sgpr(tmpSgpr), lastValidThread, "" )
-          kStr += inst("v_cmp_lt_u32", \
-              self.vcc, \
-              vgpr("Serial"), \
-              sgpr(tmpSgpr), \
-              "tid < valid-tid")
-          boundsVgpr = self.vgprPool.checkOut(3)
-          kStr += inst("s_mov_b32", sgpr(tmpSgpr), "BufferOOB", "" )
-          kStr += inst("v_mov_b32", vgpr(boundsVgpr), sgpr(tmpSgpr), "" )
-          kStr += inst("v_cndmask_b32", \
-               vgpr("GlobalReadOffset%s+%u"%(tP["tensorChar"], graIdx)), \
-               vgpr(boundsVgpr), \
-               vgpr("GlobalReadOffset%s+%u"%(tP["tensorChar"], graIdx)), \
-               self.vcc,
-               "Mask load so OOB will return 0")
-          self.vgprPool.checkIn(boundsVgpr)
 
     needFirstSgprOffset = kernel["DirectToLds%s"%tc] and kernel["UseInstOffsetForGRO"]
     if (kernel["_UseSgprForGRO"] or self.checkGRO) and (needFirstSgprOffset or graIdx > 0):
@@ -4643,30 +4609,6 @@ class KernelWriterAssembly(KernelWriter):
           vgpr(destVgpr), \
           "Copy lds write address VGPR to SGPR")
       self.vgprPool.checkIn(destVgpr)
-
-    if kernel["FractionalLoad"] and kernel["fractionalPerpOverhang%s"%tc]:
-      overhang = kernel["fractionalPerpOverhang%s"%tc]
-      validWI = overhang*kernel[tP["lsc"]]//tP["glvw"]
-      if kernel["FractionalLoad"] == 2:
-        mask = "PerpOverhangVcc%s"%tc
-      else:
-        mask = self.getTmpSgpr(2).idx()
-      kStr += self.comment1("Compute fractional overhang")
-      kStr += inst("s_mov_b32", sgpr(mask), validWI, \
-          "overhang=%u, validWI=%u" % (overhang, validWI))
-      kStr += inst("v_cmp_lt_u32", \
-          sgpr(mask,2),
-          vgpr("Serial"), \
-          sgpr(mask,1),
-          "fractional-overhang: some wi write to harmless LDS location")
-      if kernel["FractionalLoad"] == 1:
-        kStr += inst("v_cndmask_b32", \
-                    vgpr("LocalWriteAddrOverhang%s"%tc), \
-                    1.0, \
-                    vgpr("LocalWriteAddr%s"%tc), \
-                    sgpr(mask,2), \
-                    "Mask load so out-of-gr-tile bounds returns 0. Note 1.0f=0x3f80000 which is large non-neg int")
-
 
     self.vgprPool.checkIn(tP["gpr"]["uReg"])
     tP["gpr"]["uReg"] = None
@@ -7836,27 +7778,6 @@ class KernelWriterAssembly(KernelWriter):
         instructionCnt += 1
         localWriteCode = imod.addCode(Code.Module("LocalWrite%u perp=%d"%(instructionCnt,perp)))
         lwa = "LocalWriteAddr%s"%tc  # default
-        if kernel["FractionalLoad"] and perp==tP["nrp"]-1:
-          # add inline here:
-          overhang = kernel["fractionalPerpOverhang%s"%tc]
-          if overhang:
-            if kernel["FractionalLoad"]==1:
-              # Use already-computed vpr:
-              lwa = "LocalWriteAddrOverhang%s"%tc
-            elif kernel["FractionalLoad"]==2:
-              if tmpLocalWriteAddr == -1:
-                tmpLocalWriteAddr = self.vgprPool.checkOut(1,"tmpLocalWriteAddr")
-
-              validWI = overhang*kernel[tP["lsc"]]//tP["glvw"]
-              #print "%s: overhang=%u element validWI=%u" % (tc, overhang, validWI)
-              localWriteCode.addText(self.comment1("LastPerp.  overhang=%u, mask WI>%u" % (overhang, validWI)))
-              localWriteCode.addInst("v_cndmask_b32", \
-                          vgpr(tmpLocalWriteAddr), \
-                          1.0, \
-                          vgpr("LocalWriteAddr%s"%tc), \
-                          sgpr("PerpOverhangVcc%s"%tc,2), \
-                          "Mask load so out-of-gr-tile bounds returns 0. Note 1.0f=0x3f80000 which is large non-neg int")
-              lwa = tmpLocalWriteAddr
 
         for para in range(0, tP["nrc"]):
           if para>=1:

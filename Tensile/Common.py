@@ -1099,11 +1099,6 @@ validParameters = {
     # TODO: No code for -1 ?
     "TransposeLDS":                [-1, 1, 0],
 
-    # tinkered with adding extra syncs or waits in the assembly kernels to see if it would improve the sequencing between workgroups, "fully synchronous scheduling" is WAY more promising; this can be deprecated
-    "PerformanceSyncLocation":    list(range(-1, 16*16+1)),
-    "PerformanceWaitLocation":    list(range(-1, 16*16+1)),
-    "PerformanceWaitCount":       list(range(-1, 16)),
-
     # add gls or slc after global memory read/writes to change cacheing, not cacheing the writes is promising and improved performance a tiny bit
     # 1: glc, 2: slc, 3: glc+slc
     "NonTemporalD":               list(range(0,4)),
@@ -1275,9 +1270,6 @@ defaultBenchmarkCommonParameters = [
     {"DisableKernelPieces":       [ 0 ] },
     {"DepthU":                    [ -1 ] },
     {"DepthULdsDivisor":          [ 1 ] },
-    {"PerformanceSyncLocation":   [ -1 ] },
-    {"PerformanceWaitLocation":   [ -1 ] },
-    {"PerformanceWaitCount":      [ -1 ] },
     {"NonTemporalD":              [ 0 ] },
     {"NonTemporalC":              [ 0 ] },
     {"NonTemporalA":              [ 0 ] },

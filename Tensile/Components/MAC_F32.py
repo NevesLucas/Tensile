@@ -57,12 +57,10 @@ class MAC_F32_Plain(MAC):
 
         vars["ThreadTile0"] = kernel["ThreadTile0"]
         vars["ThreadTile1"] = kernel["ThreadTile1"]
-        vars["PerformanceWaitCount"] = kernel["PerformanceWaitCount"]
 
         vars["instruction"] = instruction
 
         priority = Component.Priority.find(writer)
-        macIdx = 0
 
         for idx1 in range(0, kernel["ThreadTile1"]):
             for idx0 in range(0, kernel["ThreadTile0"]):
@@ -83,12 +81,6 @@ class MAC_F32_Plain(MAC):
                         kStr += "{instruction} {cStr}, {aStr}, {bStr}{endLine}".format_map(vars)
 
                     kStr += priority(writer, 1, "Raise priority while processing macs")
-
-                    if macIdx == kernel["PerformanceWaitLocation"]:
-                        kStr += "s_waitcnt lgkmcnt({PerformanceWaitCount}) // extra wait for performance{endLine}".format_map(vars)
-                    if macIdx == kernel["PerformanceSyncLocation"]:
-                        kStr += "s_barrier // extra barrier for performance{endLine}".format_map(vars)
-                    macIdx += 1
 
         kStr += priority(writer, 0, "Reset priority after macs")
 

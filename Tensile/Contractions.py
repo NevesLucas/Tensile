@@ -176,7 +176,6 @@ class ProblemType:
         return rv
 
     def __init__(self, freeIndices=None, batchIndices=None, boundIndices=None, aDims=None, bDims=None, cDims=None, dDims=None):
-        self.convolution = None
         self.freeIndices  = freeIndices
         self.batchIndices = batchIndices
         self.boundIndices = boundIndices
@@ -530,8 +529,6 @@ class Solution:
                 d['ISA'] = [0,0,0]
 
         rv.originalSolution = OriginalSolution(d)
-        # hacky, can just construct Convolution yet again?
-        rv.problemType.convolution = rv.originalSolution["ProblemType"].convolution
 
         return rv
 

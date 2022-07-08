@@ -21,9 +21,8 @@
 
 import os
 import subprocess
-import copy, operator, pytest
+import operator, pytest
 from functools import reduce
-from Tensile.SolutionStructs import ConvProblem
 import yaml
 
 
@@ -453,69 +452,6 @@ class YamlBuilder:
         #    None
 
         return problems
-
-    @classmethod
-    def ConvolutionVsContraction(cls, conv, solution, dataType):
-        """
-        Generates a YamlBuilder object that will run in
-        ConvolutionVsContraction mode.
-        """
-        obj = cls.ConvolutionContraction(conv, {}, solution, problemFunc=cls.ProblemSizes, problemLevel=2, dataType=dataType)
-        obj.doc["GlobalParameters"]["ConvolutionVsContraction"] = 1
-        for problem in obj.doc["BenchmarkProblems"]:
-            problem[0]["OperationType"] = conv.convolutionType
-            problem[0]["ConvolutionConfig"] = [copy.deepcopy(conv.config)]
-
-        return obj
-
-    @classmethod
-    def ConvolutionContraction(cls, conv, problemType, solution, dataType, \
-                                problemFunc, generateConvFormat=True, problemLevel=1):
-        """
-        Generates a YamlBuilder object that will run a convolution, in normal
-        contraction mode.
-        """
-
-        availableArchs = cls.findAvailableArchs()
-        benchmarkParams = solution()
-
-        for item in benchmarkParams["ForkParameters"]:
-          if 'MatrixInstruction' in item and 'gfx908' not in availableArchs:
-            pytest.skip()
-            break
-
-        doc = cls.Header(debug=False)
-
-        if generateConvFormat:
-            tensileProblemType = {
-                "OperationType": conv.convolutionType,
-                "ConvolutionConfig": [{key:val} for (key,val) in conv.config.items()],
-                "DataType": dataType
-            }
-        else:
-            tensileProblemType = {
-                "OperationType": "TensorContraction",
-                "DataType": dataType
-            }
-            tensileProblemType.update(problemType)
-
-        for (key,value) in conv.solutionParms.items():
-            benchmarkParams["ForkParameters"].append({key:[value]})
-        problems = problemFunc(conv, problemType, problemLevel)
-
-        #print("problems:", problems)
-        if generateConvFormat:
-            convs = [ {"Conv": e} for e in problems]
-            benchmarkParams["BenchmarkFinalParameters"] = [{"ProblemSizes": convs }]
-        else:
-            exacts = [{"Exact": dict(ConvProblem(p, conv).toExactDict())} for p in problems]
-            benchmarkParams["BenchmarkFinalParameters"] = [{"ProblemSizes": exacts}]
-
-        doc["BenchmarkProblems"] = [[tensileProblemType, benchmarkParams]]
-
-        #print (doc)
-
-        return cls(doc)
 
     # shortcuts for setting parameters in tests:
 defaultSizes = pytest.param((YamlBuilder.ProblemSizes, 1), id="default_sizes")

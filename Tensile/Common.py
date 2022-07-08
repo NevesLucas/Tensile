@@ -80,14 +80,6 @@ globalParameters["ForceRedoBenchmarkProblems"] = True # if False and benchmarkin
 globalParameters["ForceRedoLibraryLogic"] = True      # if False and library logic already analyzed, then library logic will be skipped when tensile is re-run
 globalParameters["ForceRedoLibraryClient"] = True     # if False and library client already built, then building library client will be skipped when tensile is re-run
 
-# Compare CPU reference convolution model vs golden tensor contracton model
-# Useful to test if conversion from tensor contraction is working as expected
-# In this mode, the filter,stride,dilation are specified in the problem type.
-# If the problem type uses constant Filter,Stride,Dilation,Pad* (ie these are not 'N'), then the
-# specified constant MUST match the dimension in the problem or the tensile runtime will assert.
-# The batch size, spatial dims, Cin, and Cout are always read from the problem description.
-globalParameters["ConvolutionVsContraction"] = False
-
 globalParameters["ShowProgressBar"] = True     # if False and library client already built, then building library client will be skipped when tensile is re-run
 globalParameters["SolutionSelectionAlg"] = 1          # algorithm to detetermine which solutions to keep. 0=removeLeastImportantSolutions, 1=keepWinnerSolutions (faster)
 globalParameters["ExpandRanges"] = True          # expand ranges into exact configs before writing logic file.  False ignores ranges.
@@ -172,7 +164,6 @@ globalParameters["ExpectedValueC"] = 16.0         # Expected C Value when CheckV
 globalParameters["ForceCExpectedValue"] = False   # Force C to "DebugExpectedValueC", debug for global write
 
 # Tensor printing controls:
-globalParameters["PrintConvolutionUsage"] = 0      # Print Convolution usage info. 1=tensor fields,2=boilerplate info,4=print tensor mappings for specified ConvProblems
 globalParameters["PrintTensorA"] = 0          # Print TensorA after initialization
 globalParameters["PrintTensorB"] = 0          # Print TensorB after initialization
 globalParameters["PrintTensorC"] = 0          # Print TensorC.  0x1=after init; 0x2=after copy-back; 0x3=both
@@ -1359,71 +1350,6 @@ for paramDict in defaultBenchmarkCommonParameters:
     defaultSolution[key] = value[0]
 # other non-benchmark options for solutions
 
-# valid fields in ConvolutionConfig and explanations:
-validConvolutionConfig= [
-    # For OperationType == Convolution*
-    # Examples: NCHW, NHWC, NCDHW, more
-    # *HW* and *YX*   create solution with 2 spatial dimensions.
-    # *DHW* and *ZYX* create solution with 3 spatial dimensions.
-    "TensorAFormat",           # see validTensorAFormats
-    "TensorBFormat",           # see validTensorBFormats
-    "TensorDFormat",           # see validTensorDFormats
-
-    # Each of the parms below specifies dimensions separated by 'x".
-    # -  The notation follows 'convolution' convention so fastest-moving dimensions are last,
-    #    and should mirror the order of the spatial dimension in the activation format.
-    #    For example, in NCHW format Filter=3x1 is 3 in the H dimension and 1 in the W dimension.
-    # -  2 or 3 dimensions are supported 'Filter:3x1' or 'Filter:3x3x1'.
-    # - Use an integer to create a kernel with a compile-time constant
-    #   Use "N" to create flexible kernel the value provided at runtime via appropriate
-    #   size and stride values.
-    # - 0 specifies the default.  Defaults below shown for 2 spatial dimensions; a 3-dimensional
-    #   default will be created if the formats request 3 spacial dimensions.
-    "Filter",                   # examples: 1x1,3x3,1x7,7x1,NxN,Nx5,3x3x3.  Default=1x1/1x1x1.
-    "Stride",                   # examples 1x1,2x2,1xN, 2x2x2.  Default=1x1/1x1x1.
-    "Dilation",                 # examples 1x1,2x2,1xN, 2x2x2.  Default=1x1/1x1x1.
-
-    # Pad at start of each filter dimension. Recommend 0x0 when possible or NxN otherwise.
-    # (performance difference from compile-time padding is not significant)
-    "PadStart",                 # examples:1x1, 2x3, 2x2x2, NxN.  Default=0x0/0x0x0.
-    # Pad at end of each filter dimension
-    "PadEnd",                   # examples:1x1, 2x3, 2x2x2, NxN.  Default=0x0/0x0x0.
-
-    # For grouped convolutions:
-    "GroupCount",
-
-    # pack spatial dims (d,h,w) into single tensor dim when possible
-    # This is preferred for cases where these dimensions are packed in memory
-    # since it reduces addressing overhead and will produce a more efficient kernel
-    # Default is 1, multiple dimensions will be created if needed for strides or other cases.
-    "PackedSpatialDims",
-
-    # pack filter dims (z,y,x) into single tensor dim when possible.
-    # This is preferred for cases where these dimensions are packed in memory
-    # since it reduces addressing overhead and will produce a more efficient kernel
-    # Default is 1, multiple dimensions will be created if needed for dilations or other cases.
-    "PackedFilterDims",
-
-    # If 1:
-    #  - Unroll index is the channel index
-    #  - if PackSummationDims=0, this is likely highest perf since it provides a larger
-    #    iteration count for the unroll loop.
-    # If 0:
-    #   - Unroll index is filter index (Forward,BackwardData) or spatial index (BackwardWeights)
-    #   - provides better cache locality for most formats, but tigher looping.
-    #   - Likely a good idea with PackSummationDims=1 since there is only one unroll loop.
-    "UnrollOnChannel",
-
-    # Input spatial dimensions (D,H,W)
-    # Optional parameter for debug and testing.  This does not impact kernel generation.
-    # If set,then each problem dimension size/stride will be checked to ensure they are
-    # correctly specified. (TBD)
-    # Also used by testbenches to compute consistent strides and sizes for auto-generated
-    # problem sizes and strides.
-    'Spatial',              # examples 56x56, 7x7.
-
-    ]
-
 ################################################################################
 # Default Problem Type
 ################################################################################
@@ -1431,8 +1357,6 @@ defaultProblemType = {
     # =GEMM uses TransposeA,B paramters and makes the problem type more readeable for users
     # =TensorContraction  requires specifying
     "OperationType":            "GEMM",           # GEMM, TensorContraction, ConvolutionForward, ConvolutionBackwardData, ConvolutionBackwardWeights
-
-    "ConvolutionConfig":        [],               # See validConvolutionConfig
 
     "DataType":                 0,                # data types can specified by a variety of ways, such as "s", as listed in SolutionStructs.py::DataType
     "DestDataType":             0,                # destination data types can specified by a variety of ways, such as "s", as listed in SolutionStructs.py::DataType
@@ -2040,14 +1964,6 @@ def assignParameterWithDefault(destinationDictionary, key, sourceDictionary, \
     destinationDictionary[key] = deepcopy(sourceDictionary[key])
   else:
     destinationDictionary[key] = deepcopy(defaultDictionary[key])
-
-# populate dst with src[key] else abort since it's required
-def assignParameterRequired(destinationDictionary, key, sourceDictionary):
-  if key in sourceDictionary:
-    destinationDictionary[key] = deepcopy(sourceDictionary[key])
-  else:
-    printExit("Parameter \"%s\" must be defined in dictionary %s" % (key, sourceDictionary) )
-
 
 ################################################################################
 # Push / Pop Working Path

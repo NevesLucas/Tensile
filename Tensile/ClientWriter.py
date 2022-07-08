@@ -460,9 +460,6 @@ def writeClientConfigIni(problemSizes, activationArgs, problemType, sourceDir, c
                 param("code-object", os.path.join(sourceDir,coFile))
 
         param('results-file', resultsFileName)
-        convValidation = problemType.convolution and globalParameters["ConvolutionVsContraction"];
-        if convValidation:
-            param('convolution-identifier', problemType.convolution.identifier())
         param('performance-metric', globalParameters["PerformanceMetric"])
         param('problem-identifier', problemType.operationIdentifier)
         param('a-type',     problemType.aType.toEnum())
@@ -478,8 +475,6 @@ def writeClientConfigIni(problemSizes, activationArgs, problemType, sourceDir, c
         for problem in problemSizes.problems:
             for key,value in problemSizeParams(problemType, problem):
                 param(key,value)
-            if convValidation:
-              param('convolution-problem', problemType.convolution.identifier(problem))
 
         if activationArgs:
           for setting in activationArgs.settingList:
@@ -525,8 +520,6 @@ def writeClientConfigIni(problemSizes, activationArgs, problemType, sourceDir, c
         param("num-syncs-per-benchmark",  globalParameters["SyncsPerBenchmark"])
         param("use-gpu-timer",            globalParameters["KernelTime"])
         param("hardware-monitor",         globalParameters["HardwareMonitor"])
-        if convValidation:
-            param("convolution-vs-contraction", globalParameters["ConvolutionVsContraction"])
         if not globalParameters["KernelTime"]:
             param("num-warmups", 1)
         param("sleep-percent",            globalParameters["SleepPercent"])

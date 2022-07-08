@@ -1034,11 +1034,6 @@ class Solution(collections.abc.Mapping):
             % (state["MacroTile0"], state["MacroTile1"], \
             state["MacroTileShapeMin"], state["MacroTileShapeMax"]))
 
-    if "WorkGroupMappingType" in state:
-      if state["WorkGroupMappingType"] == "Z":
-        if abs(state["WorkGroupMapping"]) > 2:
-          reject(state, "WorkGroupMappingType=Z only supports WorkGroupMapping=1, 2")
-
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True
 

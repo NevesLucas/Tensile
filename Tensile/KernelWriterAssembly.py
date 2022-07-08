@@ -3312,7 +3312,7 @@ class KernelWriterAssembly(KernelWriter):
     ########################################
     # Blocked rows or columns
     absWgm = abs(kernel["WorkGroupMapping"])
-    if kernel["WorkGroupMappingType"] == "B" and abs(kernel["WorkGroupMapping"]) > 1:
+    if abs(kernel["WorkGroupMapping"]) > 1:
       smallNumMagicShift = 31
       magicNumberWgm = ((1<<smallNumMagicShift) // absWgm + 1)
 

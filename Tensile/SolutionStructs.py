@@ -4143,12 +4143,6 @@ class Solution(collections.abc.Mapping):
         if not bufferLoad:
           reject(state, "asm ZeroPad requires BufferLoad")
 
-    # Ensure AssertCEqualsD is always used with LdcEqualsLdd --DISABLED CURRENTLY
-    #if state["AssertCEqualsD"]:
-    #  if not ("LdcEqualsLdd" in state["ProblemType"] and state["ProblemType"]["LdcEqualsLdd"]):
-    #    import pdb; pdb.set_trace()
-    #    reject(state, "AssertCEqualsD requires LdcEqualsLdd=True")
-
     state["AssignedDerivedParameters"] = True
 
     # UnrollLoopEfficiencyEnable does not work with f16/bf16/int8x4
@@ -4204,7 +4198,6 @@ class Solution(collections.abc.Mapping):
     requiredParameters["MacroTile0"]        = False # always prepended
     requiredParameters["MacroTile1"]        = False # always prepended
     requiredParameters["DepthU"]            = False # always prepended
-    requiredParameters["LdcEqualsLdd"]      = False # always prepended
     requiredParameters["MatrixInstruction"] = False # always prepended
     requiredParameters["MatrixInstM"]       = False # always prepended
     requiredParameters["MatrixInstN"]       = False # always prepended
@@ -4250,11 +4243,7 @@ class Solution(collections.abc.Mapping):
       name += "%s%ux%ux%ux%u_" \
           % ( Solution.getParameterNameAbbreviation("MatrixInstruction"), \
           state["MatrixInstM"], state["MatrixInstN"], state["MatrixInstK"], state["MatrixInstB"])
-    if "LdcEqualsLdd" in state:
-      if state["LdcEqualsLdd"]:
-        name += "SE_"
-      else:
-        name += "SN_"
+    name += "SN_" # LdcEqualsLdd Removed
     for key in sorted(state.keys()):
       if key in requiredParameters and key[0] != '_':
         if requiredParameters[key] and key != "CustomKernelName":

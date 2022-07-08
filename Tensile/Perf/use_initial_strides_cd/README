@@ -8,7 +8,6 @@ Parm guide for supporting arbitrary strides with C != D:
   - UseInitialStridesCD: true
 
 - In the solution generation
-   - LdcEqualsLdd=0 : Costs a couple percent in limited testing.
    - UseInitialStridesAB requires GlobalReadVectorWidth=1, this impacts perf a bit
    - UseInitialStridesCD will set vector-store to 0 internally, this impacts perf 5%-10%.
 

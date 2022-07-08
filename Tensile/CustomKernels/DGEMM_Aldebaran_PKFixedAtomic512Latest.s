@@ -74,7 +74,6 @@ custom.config:
     TransposeB: True
     UseBeta: True
     Batched: True
-    LdcEqualsLdd: True
   MatrixInstruction: [16, 16, 4, 1]
   ThreadTile: [ 8, 32 ]
   WorkGroup: [  16, 16,  1 ]

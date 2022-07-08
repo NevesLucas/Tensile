@@ -540,13 +540,6 @@ validParameters = {
     # -2 will derived an optimized value and override LWPM silently (debug only, not recommended)
     "LocalWritePerMfma":       [ i/100 for i in range(1,3200)] + [ -1 ],
 
-    # LDD Support
-    # Allow LDD and StrideD to != LDC and StrideC for LDD <= LDC and LDD == M
-    # TODO: remove. legacy logic yaml in rocblas contains true and false for this parameter
-    # remove this parameter will cause two kernels have same.
-    # so we can't remove it until we clean logic yaml in rocblas
-    "LdcEqualsLdd":               [ False, True ],
-
     # Interleave alpha scale calculation with beta loads and address calcs - rather
     # than as a separate block of instructions
     "InterleaveAlpha":             [0, 1],
@@ -1262,8 +1255,6 @@ defaultBenchmarkCommonParameters = [
     {"ScheduleLocalWrite":        [ 1 ] },
     {"ScheduleIterAlg":           [ 1 ] },
     {"OptPreLoopVmcnt":           [ True ] },
-
-    {"LdcEqualsLdd":              [ False ] },
 
     {"GlobalReadPerMfma":         [ 1 ] },
     {"LocalWritePerMfma":         [ -1 ] },

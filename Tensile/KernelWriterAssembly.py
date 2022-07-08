@@ -3233,7 +3233,6 @@ class KernelWriterAssembly(KernelWriter):
     tmpV2 = tmpV0 + 2
     tmpV3 = tmpV0 + 3
 
-    #assert(kernel["LdcEqualsLdd"])
     kStr += inst("v_mov_b32", vgpr(tmpV0), vgpr(packedCoordVgpr),  "copy coord1 then unpack")
     for i,idx in enumerate(packedC1[:-1]):
       idxChar= globalParameters["IndexChars"][idx]

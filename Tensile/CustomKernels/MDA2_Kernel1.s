@@ -73,7 +73,6 @@ custom.config:
     TransposeB: False
     UseBeta: True
     Batched: True
-  LdcEqualsLdd: True
   1LDSBuffer: 0
   AggressivePerfMode: 1
   BufferLoad: True
@@ -125,7 +124,7 @@ custom.config:
   AssertStrideCEqual: {0: 1}
   AssertSummationElementMultiple: 8
   AssertSizeMultiple: {0: 64, 1: 128, 3: 64}
-  AssertSizeGreaterThan: {3: 191} 
+  AssertSizeGreaterThan: {3: 191}
 
 amdhsa.version:
   - 1

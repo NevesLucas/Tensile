@@ -367,7 +367,6 @@ class ProblemType(Mapping):
     # Other
     if self["UseBeta"]: name += "B"
     if self["HighPrecisionAccumulate"] and not self["SilentHighPrecisionAccumulate"]: name += "H"
-    if self["Fp16AltImpl"]: name += "R"
     if self["UseInitialStridesAB"]: name += "I"
     if self["UseInitialStridesCD"]: name += "Ic"
 
@@ -2756,13 +2755,6 @@ class Solution(collections.abc.Mapping):
         reject(state, "AtomicAddC requires AssertCEqualsD")
         return
 
-    if state["ProblemType"]["Fp16AltImpl"]:
-      if not (state["ProblemType"]["DataType"].isHalf() and \
-              state["ProblemType"]["HighPrecisionAccumulate"] and \
-              state["EnableMatrixInstruction"]):
-        reject(state, "Fp16AltImpl requires FP16 HPA MFMA")
-        return
-
     #check not support cases and calculate lds resources
     if state["StoreRemapVectorWidth"]:
       if not state["EnableMatrixInstruction"]:
@@ -3201,7 +3193,6 @@ class Solution(collections.abc.Mapping):
     requiredParameters["MatrixInstBM"]      = False # always prepended
     requiredParameters["MatrixInstBN"]      = False # always prepended
     requiredParameters["CustomKernelName"]  = False # Will not affect naming
-    requiredParameters["Fp16AltImpl"]       = False # Will show up as a different type
 
     requiredParameters["Kernel"]            = True  # distinguish kernels from solutions
                                                     # for single-source compilation

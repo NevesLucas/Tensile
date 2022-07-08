@@ -955,9 +955,6 @@ validParameters = {
     # assume atomics always work correctly.
     "DisableAtomicFail": [False, True],
 
-    # alternate implementation for fp16 HPA MFMA
-    "Fp16AltImpl": [False, True],
-
     # 0  : standard launch
     # N>0 : launch persistent kernel with N workgroups per compute unit
     #       - Recommended min is enough WG to use all resources on the CU
@@ -1305,7 +1302,6 @@ defaultBenchmarkCommonParameters = [
     {"StoreCInUnrollInterval":    [ 1 ] },
     {"StoreCInUnrollExact":       [ False ] },
     {"StoreCInUnrollPostLoop":    [ False ] },
-    {"Fp16AltImpl":               [ False ] },
     {"ActivationFused":           [ True  ] }
     ]
 
@@ -1390,9 +1386,6 @@ defaultProblemType = {
 
     # Tile aware solution selection
     "TileAwareSelection":       False,
-
-    # FP16 Alternate Implementation
-    "Fp16AltImpl":              False,
 
     # Activation
     "Activation":               False,

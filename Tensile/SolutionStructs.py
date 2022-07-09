@@ -1796,21 +1796,6 @@ class Solution(collections.abc.Mapping):
 
     state["WorkGroupMapping" ] = abs(state["WorkGroupMapping"])
 
-    # avoid bug somehow related to GlobalSplitU + Persistent
-    # avoid bug related to WGM<0
-    # General Batch doesn't support PersistentKernel
-    if state["PersistentKernel"] and (\
-            (state["KernelLanguage"] == "Assembly" and state["GlobalSplitU"] != 1) or \
-            (state["KernelLanguage"] == "Assembly" and state["WorkGroupMapping"] < 0)):
-      state["PersistentKernel"] = 0
-
-    if state["PersistentKernelAlongBatch"] and (\
-            (state["PersistentKernel"] == 0) or \
-            (state["KernelLanguage"] == "Source" and state["GlobalSplitU"] != 1)):
-      print2("PersistentKernelAlongBatch requires PersistentKernel != 0, forcing PersistentKernelAlongBatch = False")
-      print2("PersistentKernelAlongBatch not support GSU on HIP, forcing PersistentKernelAlongBatch = False")
-      state["PersistentKernelAlongBatch"] = False
-
     problemType = state["ProblemType"]
     if not problemType["UseInitialStridesAB"]:
       for (tc) in ('A','B'):

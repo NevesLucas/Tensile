@@ -356,10 +356,6 @@ class ProblemPredicate(Properties.Predicate):
             if ('_GlobalAccumulation' not in state) or (state['_GlobalAccumulation'] != 'MultipleBuffer'):
                 rv += [cls("DeterministicMode", value = False)]
 
-        # debugging: mark this set to allow the problem always runnable with PK
-        if 'PersistentKernel' in state and state['PersistentKernel']:
-            rv += [cls("PersistentKernelCheck")]
-
         if ("MatrixInstruction" in state and state["MatrixInstruction"]) or \
            ("EnableMatrixInstruction" in state and state["EnableMatrixInstruction"] is True):
             rv += [cls("ArithmeticUnitCompatible", value="MFMA")]
@@ -419,8 +415,6 @@ class SizeMapping:
                  'workGroupMapping',
                  'packBatchDims',
                  'magicDivAlg',
-                 'persistentKernel',
-                 'persistentKernelAlongBatch',
                  'sourceKernel',
                  'globalAccumulation',
                  'workspaceSizePerElemC',
@@ -443,8 +437,6 @@ class SizeMapping:
                    globalSplitU          = d['GlobalSplitU'],
                    staggerStrideShift    = d['_staggerStrideShift'] if '_staggerStrideShift' in d else 0,
                    packBatchDims         = d['PackBatchDims'] if 'PackBatchDims' in d else 0,
-                   persistentKernel      = d['PersistentKernel'] if 'PersistentKernel' in d else 0,
-                   persistentKernelAlongBatch   = d['PersistentKernelAlongBatch'] if 'PersistentKernelAlongBatch' in d else False,
                    magicDivAlg           = d.get('MagicDivAlg', 1),
                    sourceKernel          = d['KernelLanguage'] == 'Source',
                    globalAccumulation    = globalAccum,

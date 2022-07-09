@@ -2440,8 +2440,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         # These cases loop back and run the prefetch loop again
         # we need an extra barrier to ensure that the ds_reads (either for SR or MFMA) from previous iteration
         # have finished before we generate the prefetch for the next summation index.
-        if kernel["PersistentKernel"] or self.actualSummationLoops>1:
-          kl.append( self.indent + self.syncStr + "// for PersistentKernel " + self.endLine )
+        if self.actualSummationLoops>1:
+          kl.append( self.indent + self.syncStr + self.endLine )
 
       if self.enable["LocalWrite"]:
         # local write

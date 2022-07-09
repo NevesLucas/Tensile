@@ -920,26 +920,6 @@ validParameters = {
     #   this will create a set of kernels with progessively more pieces of the kernel disabled
     "DisableKernelPieces":        list(range(-9,10)),         # disable pieces of the kernel, for performance isolation
 
-    # 0  : standard launch
-    # N>0 : launch persistent kernel with N workgroups per compute unit
-    #       - Recommended min is enough WG to use all resources on the CU
-    #       - Higher values result in shorter-running WG which are less 'persistent'
-    #         this increases the switch time between work-groups but results in
-    #         more opportunities to schedule other WG or recover if a wg runs long
-    #         or all compute units were not available before the launch.
-    #       - Host code will not launch more groups than tiles in the C space
-    # -1 : Automatically choose a "heuristic" value that can possibly get a better gain: (TilesPerWorkgroup = 1~2)
-    #      Not based on any theory, but on some experiment observation, can be used to reduce the kernels
-    #      Recommand [-1,0,1] for basic tuning
-    # Assertions/Requirements: NumWorkGroups0 * NumWorkGroups1 < 2^32
-    "PersistentKernel":           range(-1,512+1) ,       # Use persistent kernel.
-
-    # True:  Batch dimension (WG.z) is also considered in persistent kernel
-    # False: Not considered
-    #        for problems with large batch-size, PKAB = True could help
-    #        for problems with only one batch, PKAB = True/False should make no difference
-    "PersistentKernelAlongBatch": [False,True],
-
     # Allow macro-tile to span batch dimensions and thus a single workgroup can work across batch dimensions.
     # This can improve utilization, in particular if macro-tile is larger than the lower dimensions.
     # The byte address of the last element in the packed array must fit in 2^32.
@@ -1216,8 +1196,6 @@ defaultBenchmarkCommonParameters = [
     {"GlobalSplitUWorkGroupMappingRoundRobin":    [ False ] },
     {"MacroTileShapeMin":         [ 1 ] },
     {"MacroTileShapeMax":         [ 64 ] },
-    {"PersistentKernel":          [ 0 ] },
-    {"PersistentKernelAlongBatch":[ False ] },    # May be default True is better ?
     {"PackBatchDims":             [ 0 ] },
     {"PackFreeDims":              [ 1 ] },
     {"UnrollIncIsDepthU":         [ 0 ] },

@@ -241,9 +241,6 @@ class ShiftVectorComponentsMFMA(ShiftVectorComponents):
                                 for c  in range(complexMultiplier):
                                     for nr in range(regPerElem):
                                         vgprOffsetForSCIU = 0
-                                        if kernel["StoreCInUnroll"] and writer.enableSingleNLLOpt:
-                                          # single NLL opt case, use second acc register set
-                                          vgprOffsetForSCIU += writer.startaccValuC1
                                         copyInstStr = "v_accvgpr_read_b32" if not kernel["MIArchVgpr"] else "v_mov_b32"
                                         for e in range(min(r, allContOutCoal)):
                                             src = (e+(glvw-r)) % allContOutCoal

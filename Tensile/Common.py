@@ -888,28 +888,6 @@ validParameters = {
     # There are index or address calculation between global instructions.
     # issue global instruction b2b has better performance
     "GroupLoadStore":             [False, True],
-    #
-    # Do storeC (output of GEMM) in unroll Loop; When PK enabled, storeC Code section can be
-    # moved into unroll Loop code section for tiles[0..N-2], storeC scheduled in PK[1..N-1]
-    # Enable this feature when PK is enabled
-    # Enable this feature when you have 2 or More Tiles/CU
-    # disable StoreSyncOpt, StorePriorityOpt,GroupLoadStore feature when this feature is enabled
-    # enable PersistentKernel
-    "StoreCInUnroll":             [False, True],
-    #
-    # StoreCInUnrollInterval is to specify the MFMA interval between 2 StoreC/AtomicAdd.
-    # (This is effective only for StoreVectorWidth=1)
-    # Actual MCMA interval is StoreCInUnrollInterval * (1/ LocalWritePerMfma).
-    # For example, if StoreCInUnrollInterval=3, LocalWritePerMfma=0.5, StoreC/AtomicAddC inserted
-    # at every 6 MFMAs (interval = 6)
-    "StoreCInUnrollInterval":     list(range(1, 16)),
-    #
-    # StoreCInUnrollExact is to optimize specific K size by removing arbitrary K support code
-    # 128x128 tile case, only K=512 is covered by StoreCInUnroll
-    "StoreCInUnrollExact":        [False, True],
-    #
-    # StoreCInUnrollPostLoop is to add extra post loop to execute remaining LoadC/StoreC for K < supported minimumK for StoreCInUnroll
-    "StoreCInUnrollPostLoop":     [False, True],
 
     # In order to remove the copying from Acc vgpr to Arch vgpr, only use Arch vgprs for v_mfma_xxx.
     # Only support for kernel whose totalVgpr counts less than 256 and gcn that has control bit ACC_CD.
@@ -1274,10 +1252,6 @@ defaultBenchmarkCommonParameters = [
     {"StoreSyncOpt":              [ 0 ] },
     {"GroupLoadStore":            [ False ] },
     {"MIArchVgpr":                [ False ] },
-    {"StoreCInUnroll":            [ False ] },
-    {"StoreCInUnrollInterval":    [ 1 ] },
-    {"StoreCInUnrollExact":       [ False ] },
-    {"StoreCInUnrollPostLoop":    [ False ] },
     {"ActivationFused":           [ True  ] }
     ]
 

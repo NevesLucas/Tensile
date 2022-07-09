@@ -128,8 +128,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.globalReadACode = Code.StructuredModule() # empty
       self.globalReadBCode = Code.StructuredModule() # empty
 
-    numGlobalReadC = self.getNumberOfLoadCInForLoadC(kernel)
-
     lastLoadIter = 0
     PRECISION = 100
     if kernel["EnableMatrixInstruction"] and kernel["ScheduleIterAlg"] == 3:
@@ -280,10 +278,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
         numLoadsA = kernel["DepthU"]*kernel["MacroTileA"]//kernel["GlobalLoadVectorWidthA"]//kernel["NumThreads"]
         numLoadsB = kernel["DepthU"]*kernel["MacroTileB"]//kernel["GlobalLoadVectorWidthB"]//kernel["NumThreads"]
         writesToSched = (numLoadsA + numLoadsB - 1) * PRECISION
-        # In StoreCInUnroll case, add StoreC code related code to writesToSched
-        if kernel["StoreCInUnroll"]:
-          numStoreCUnrollCode = len(list(self.StoreCUnrollCode.items()))
-          writesToSched += numStoreCUnrollCode * PRECISION
         oldValue = 0
         newValue = PRECISION
         loop = 0
@@ -368,11 +362,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
         # how many local writes
         localWritesToSched = self.localWriteACode.countType(Code.LocalWriteInst) + \
                              self.localWriteBCode.countType(Code.LocalWriteInst)
-        if kernel["StoreCInUnroll"]:
-          # in StoreCInUnroll case, add number of storeC related code here
-          # add store C related code to itemsLWToSched
-          numStoreCUnrollCode = len(list(self.StoreCUnrollCode.items()))
-          localWritesToSched += numStoreCUnrollCode
         localWritesPerMfma = self.numLocalWriteModPerMfma / PRECISION # was scaled by PRECISION
         # _numMfmaBetweenLastLWandBarrier: a function of 'spacing', which is num of mfma instructions until local write starts
         _numMfmaBetweenLastLWandBarrier = lambda spacing : self.barrierMfmaIndex + 1 - ceil(localWritesToSched/localWritesPerMfma) - spacing
@@ -392,19 +381,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
         return max(0, _numMfmaBetweenLastLWandBarrier(spacing))
 
       numMfmaBetweenLWandBarrier = assignParamSplitLds(numMfmaBetweenLWandBarrier)
-      # In StoreCInUnroll case, reduce numMfmaBetweenLWandBarrier to 1 because interval between local write and read is already added by StoreCInUnroll code
-      if kernel["StoreCInUnroll"]:
-        numMfmaBetweenLWandBarrier = min(numMfmaBetweenLWandBarrier, 1)
       self.lwEndMfmaIndex = max(self.barrierMfmaIndex - numMfmaBetweenLWandBarrier,0) if self.numItersPLR else numMfmaPerIter*kernel["LoopIters"] - 1
       # adjust lwEndMfmaIndex for the following cases
       #  1) PGR=2 + DirectToVgpr(DTV)
-      #  2) last loop and StoreCInUnrollPostLoop enabled case
+      #  2) last loop enabled case
       # In these cases, lwEndMfmaIndex needs to be < numMfmaPerIter * (kernel["LoopIters"] - 1)
       # to schedule global read for DTV after lwEndMfmaIndex or execute PostLoop after StoreC in NoLoadLoop
       # kernel["LoopIters"]  has to be > 1 to make this logic work.
       if kernel["LoopIters"] > 1 and \
          ((kernel["PrefetchGlobalRead"] == 2 and (kernel["DirectToVgprA"] or kernel["DirectToVgprB"])) or \
-          (lastLoop and kernel["StoreCInUnrollPostLoop"])):
+          lastLoop):
         self.lwEndMfmaIndex = min(self.lwEndMfmaIndex, numMfmaPerIter * (kernel["LoopIters"] - 1) - 1)
       if kernel["DirectToLds"] and kernel["PrefetchGlobalRead"] == 2:
         # DirectToLds + PGR=2 case, lwEndMfmaIndex must be after the end of local read (excluding local reads for next iter)
@@ -460,20 +446,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
         itemsGRToSched =  list(self.globalReadACode.middle.items()) + \
                         list(self.globalReadBCode.middle.items())
         itemsGRToSchedLater = []
-        if kernel["StoreCInUnroll"]:
-          # in StoreCInUnroll case, add loadC code here (self.LoadCTemplate is empty for no loadC required case)
-          # The location to insert LoadC is decided based on DirectToLds and DirectToVgpr setting
-          # 1) No Lds write case (Both DirectToLds or DirectToVgpr enabled), insert Load C before Load A and B
-          if kernel["NoLdsWriteCode"]:
-            itemsGRToSched =  list(list(self.LoadCUnrollCode.itemList) + self.globalReadACode.middle.items()) +\
-                            list(self.globalReadBCode.middle.items())
-          # 2) DirectToVgpr only enabled case, insert Load C before Load for DirectToVgpr
-          elif kernel["DirectToVgprA"] or kernel["DirectToVgprB"]:
-            itemsGRToSched =  list(self.globalReadACode.middle.items()) + list(self.LoadCUnrollCode.itemList) +\
-                            list(self.globalReadBCode.middle.items())
-          # 3) no DirectToVgpr/Lds case, insert Load C after Load A,B
-          else:
-            itemsGRToSched += list(self.LoadCUnrollCode.itemList)
 
       itemsGRToSchedTemp = []
       for i in range(len(itemsGRToSched)):
@@ -499,18 +471,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # swap the order of readInc for DTVA
           globalReadInc1, globalReadInc2 = globalReadInc2, globalReadInc1
         globalReadIncItems = globalReadInc1 + globalReadInc2
-        if kernel["StoreCInUnroll"] and  kernel["PrefetchGlobalRead"] == 2:
-          # PGR=2 + StoreCInUnroll case, add first LoadC after IncA, second LoadC (if exist) after IncB
-          tmpList = list(self.LoadCUnrollCode.itemList)
-          dummyList = [ Code.Module() for i in range (numInstPerMfma - 1) ]
-          if len(tmpList) > 0:
-            # first LoadC
-            globalReadIncItems = globalReadInc1 + tmpList[0:1] + dummyList + globalReadInc2
-          if len(tmpList) > 1:
-            # second LoadC
-            globalReadIncItems += tmpList[1:]
-          # add len(LoadCUnrollCode.itemList) to numInst
-          numInst += len(tmpList)
         numMfmaToSched = roundUp(numInst/numInstPerMfma)
         for j in range(numMfmaToSched):
           imod = Code.Module()
@@ -623,16 +583,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       assert not itemsGRToSched # should have scheduled everything already, itemsGRToSched should be empty
 
-      # adjustment for StoreCInUnroll
-      # lastLoop case, make the last perIterGlobalReadCode[] (LoopIters-1) empty
-      # otherwise, mixing global read inc code and StoreCInUnroll post code could cause memory access issue
-      if kernel["StoreCInUnroll"] and lastLoop:
-        lastIter = kernel["LoopIters"] - 1
-        prevLastIter = max(0, lastIter - 1)
-        if prevLastIter < lastIter:
-          while self.perIterGlobalReadCode[lastIter].items():
-            self.perIterGlobalReadCode[prevLastIter].addCode(self.perIterGlobalReadCode[lastIter].items().pop(0))
-
       self.perIterGlobalReadCode[endIter-1].addCode(self.globalReadACode.footer)
       self.perIterGlobalReadCode[endIter-1].addCode(self.globalReadBCode.footer)
 
@@ -662,7 +612,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["PrefetchGlobalRead"] == 2:
         # PrefetchGlobalRead + DirectToLds case, need to add dummy list to insert global read
         tmpList = []
-        numItemsBeforeStoreC = 0 #if not kernel["StoreCInUnroll"] else self.numItemsBeforeStoreC
+        numItemsBeforeStoreC = 0
         numDummy = 0
         if kernel["DirectToLdsA"]:
           numDummy += max(len(list(self.globalReadACode.middle.items())) - numItemsBeforeStoreC, 0)
@@ -674,11 +624,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
           tmpList.append(Code.Module())
         # add dummy at the top of the list
         itemsLWToSched = tmpList + itemsLWToSched
-      if kernel["StoreCInUnroll"]:
-        # in StoreCInUnroll case, add storeC related code here
-        # add store C related code to itemsLWToSched
-        tmpList = list(self.StoreCUnrollCode.items())
-        itemsLWToSched += tmpList
       # extend localWrite by inserting empty Module
       itemsLWToSchedTemp = []
       for i in range(len(itemsLWToSched)-1):
@@ -721,8 +666,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
         # DirectToVgprA case, actual A load is in self.globalReadBCode (due to swap).
         # Need to check self.globalReadBCode
         readsToWaitDTV += len(list(self.globalReadBCode.middle.items()))
-      # add waitcnt for StoreCInUnroll. Delaying wait for Load C
-      readsToWait += numGlobalReadC
 
       readsToWaitNGLL = readsToWait
 
@@ -744,9 +687,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
           imodNGLL = Code.Module("LocalWriteMod%u"%u)
           writesPerItem = item.countType(Code.LocalWriteInst)
           readsToWaitAdjustForStoreC = 0
-          if kernel["StoreCInUnroll"] and not firstIter and kernel["PrefetchGlobalRead"]==2:
-            # get number of StoreC in template
-            readsToWaitAdjustForStoreC += self.getNumberOfStoreCInTemplate(kernel)
           if writesPerItem:
             imod.addComment0("sched write - iter %u writesPerItem=%u"%(u,writesPerItem))
             imodNGLL.addComment0("sched write - iter %u writesPerItem=%u"%(u,writesPerItem))
@@ -763,10 +703,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
                 "wait for global read before writing to local"))
               imodNGLL.addCode(Code.WaitCnt(self.version, -1, min(maxVmcnt, readsToWaitNGLL  + readsToWaitDTV + readsToWaitAdjustForStoreC), \
                 "wait for global read before writing to local"))
-          if kernel["StoreCInUnroll"] or kernel["PrefetchGlobalRead"]==2:
+          if kernel["PrefetchGlobalRead"]==2:
             if "s_waitcnt" in str(item) and "__placeholder__" in str(item):
-              # waitcnt adjustment for StoreCInUnroll
-              readsToWaitAdjust = readsToWait + readsToWaitDTV - numGlobalReadC
+              readsToWaitAdjust = readsToWait + readsToWaitDTV
               if kernel["PrefetchGlobalRead"]==2:
                 # PGR=2 special cases
                 if (kernel["AtomicAddC"] or not kernel["ProblemType"]["UseBeta"]):
@@ -774,12 +713,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
                   if not firstIter:
                     # PGR=2 and not firstIter case, __placeholder__ includes num of storeC from previous Iter
                     readsToWaitAdjust += readsToWaitAdjustForStoreC
-                else:
-                  # Load C case
-                  # adjustment for waitcnt for loadC
-                  if kernel["StoreCInUnroll"] and self.StoreCUnrollLoadCWaitComment in str(item):
-                    # readsToWaitDTV should not be added for loadC waitcnt
-                    readsToWaitAdjust -= readsToWaitDTV
               if kernel["NoLdsWriteCode"] and kernel["PrefetchGlobalRead"]!=2:
                 # DirectToLds or DirectToVgpr for both A and B case, use  the number of global read for both A and B as vmcnt (only for PGR=1)
                 readsToWaitAdjust = len(list(self.globalReadACode.middle.items())) + len(list(self.globalReadBCode.middle.items()))
@@ -792,10 +725,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
             while itemsGRToSchedLater:
               itemGR = itemsGRToSchedLater[0]
               readsInc = itemGR.countType(Code.GlobalReadInst)
-              if kernel["StoreCInUnroll"] and readsInc == 0:
-                # adjustment for StoreCInUnroll
-                # count buffer_load if it exist but not counted
-                readsInc += str(itemGR).count("_buffer_load")
               reads = reads + readsInc
               if reads > 1:
                 break
@@ -1274,14 +1203,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
             # we need to make sure globalRead before localWrite
             if writeItems and not globalReadCode.countType(Code.GlobalReadInst):
               writeItem = writeItems.pop(0)
-              # check StoreCInUnrollLoopCodeStart
-              if kernel["StoreCInUnroll"]:
-                if self.StoreCUnrollStartComment in str(writeItem):
-                  self.StoreCUnrollLoopCodeStarted = 1 # mark as started
-                if self.StoreCUnrollStoreStartComment in str(writeItem):
-                  # generate all remaining pre code before the first Store C
-                  while(len(self.StoreCUnrollPreCode.items()) > 0):
-                    iterCode.addCode(self.StoreCUnrollPreCode.items().pop(0))
               iterCode.addCode(writeItem)
               # if there is localWrite at first mfma, need to skip it in waitcnt.
               if i == 0:
@@ -1292,10 +1213,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
           while writeItems:
             writeItem = writeItems.pop(0)
             # generate all remaining pre code before the first Store C
-            if kernel["StoreCInUnroll"]:
-              if self.StoreCUnrollStoreStartComment in str(writeItem):
-                while(len(self.StoreCUnrollPreCode.items()) > 0):
-                  iterCode.addCode(self.StoreCUnrollPreCode.items().pop(0))
             iterCode.addCode(writeItem)
             if i == 0:
               skipLocalWriteWaitcnt += writeItem.countType(Code.LocalWriteInst)
@@ -1398,13 +1315,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
             iterCode.addCode(packItems.pop(0))
 
         ####
-        # scheduled StoreCInUnrollPreProcess
-        ####
-        if kernel["StoreCInUnroll"]:
-          if self.StoreCUnrollLoopCodeStarted and len(list(self.StoreCUnrollPreCode.items())) > 0:
-            iterCode.addCode(self.StoreCUnrollPreCode.items().pop(0))
-
-        ####
         # scheduled mfma
         ####
         iterCode.addCode(macIterItems.pop(0) if macIterItems else Code.Module())
@@ -1444,23 +1354,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
                 # need to swap Vgpr set for odd code
                 loadDTVText = self.flipVregSetForDirectToVgprInGlobalRead(kernel, loadDTVText)
               iterCode.addText(loadDTVText)
-
-        ####
-        # scheduled StoreCInUnrollPostProcess
-        ####
-        if kernel["StoreCInUnroll"]:
-          numItems = len(self.StoreCUnrollPostCode.items())
-          # need to make sure all global read inc is already generated
-          # (iteration should be the last one)
-          if numItems > 0 and iteration == kernel["LoopIters"] - 1 and len(globalReadCode.items()) == 0:
-            totalMfma = kernel["LoopIters"] * numMfmaPerIter
-            interval = 1
-            numInstToInsert = roundUp(numItems / (totalMfma - mfmaIndex))
-            remainingTimesToInsert = roundUp(numItems / numInstToInsert)
-            insertMfmaIndex = totalMfma - 2 - interval * (remainingTimesToInsert - 1)
-            if mfmaIndex >= insertMfmaIndex:
-              for i in range(numInstToInsert):
-                iterCode.addCode(self.StoreCUnrollPostCode.items().pop(0))
 
         if kernel["StorePriorityOpt"]:
           flagInsert = False
@@ -1915,12 +1808,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
                 waitLWCode.addCode(self.wait(kernel, tensorParametersA, tensorParametersB, -1, 0, -1, "3wait for local write"))
               if (kernel["DirectToVgprA"] or kernel["DirectToVgprB"]) and (kernel["DirectToLdsA"] or kernel["DirectToLdsB"]):
                 # DirectToVgpr + DirectToLds case, add waitcnt vmcnt before s_barrier
-                # Except for PGR=2 and Load C (StoreCInUnroll) case. In that case, Load C is executed after necessary Load A and B.
-                # Wait for Load C is already done here in PGR=2 case.
-                needLoadC = kernel["StoreCInUnroll"] and (not kernel["AtomicAddC"]) and kernel["ProblemType"]["UseBeta"]
-                if not (kernel["PrefetchGlobalRead"]==2 and needLoadC):
-                  retStr = self.getWaitcntCodeForDirectToVgpr(kernel, localWriteEndIter, u, firstIter=False, beforeBarrier=True)
-                  waitLWCode.addCode(retStr)
+                retStr = self.getWaitcntCodeForDirectToVgpr(kernel, localWriteEndIter, u, firstIter=False, beforeBarrier=True)
+                waitLWCode.addCode(retStr)
             if self.enable["Sync"]:
               syncCode.addCode(self.syncThreads(kernel))
 
@@ -1979,9 +1868,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
              setId = 1 - setId
           # use second set for DirectToVGPR
           vregSetIdxMFMA = setId # use first set for NGLL, second set for other cases
-          if ((uIdx+1) == kernel["LoopIters"]*kernel["DepthULdsDivisor"]) and \
-              (kernel["StoreCInUnroll"]):
-            lastuIdx = (isOptNLL or self.enableSingleNLLOpt) and not isNGLL # do not apply lastuIdx for not isOptNLL case
           macIterCode.addCode(self.mfmaIter(kernel, u, kernel["InnerUnroll"], vregSetIdxMFMA,lastuIdx))
         else:
           printExit("TensileLite does not support MAC instructions.")
@@ -2069,15 +1955,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.saveLocalPointers(kernel)
       # deepCopy packCode for OptNLL noLoadLoop
       deepCopyPack = copy.deepcopy(pack)
-      # keep StoreCInUnroll related code for the next noLoadLoop
-      if kernel["StoreCInUnroll"]:
-        self.backupStoreCInUnrollRelatedCode()
       self.noLoadLoopBody(kernel, tensorParametersA, tensorParametersB, kl, deepCopyPack, isOptNLL, isNGLL, NLLfirst, NLLlast, isDTVodd=True)
       # restore
       self.restoreLocalPointers(kernel)
-      # restore StoreCInUnroll related code
-      if kernel["StoreCInUnroll"]:
-        self.restoreStoreCInUnrollRelatedCode()
       # 3. generate even start label
       kl.append(self.closeOddNoLoadLoopForDTV(kernel, isNGLL, name))
       # 4. generate  no Load Loop Body code for odd
@@ -2104,9 +1984,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   def loopBody( self, kernel, tensorParametersA, tensorParametersB, kl, pack, lc, loopCopies, finalLoop, firstIter=False ):
     expand = kernel["ExpandPointerSwap"]
-
-    # generate storeC code for StoreCInUnroll (need to call for not StoreCInUnroll case as well)
-    self.generateStoreCCodeInUnrollLoop(kernel, lc & 1)
 
     # not generate openLoop for firstIter
     if not firstIter:
@@ -2383,12 +2260,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
                 kl.append(self.wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1, "12wait for global read"))
               else:
                 # DirectToVgpr + DirectToLds case, add waitcnt vmcnt before s_barrier
-                # Except for PGR=2 and Load C case. In that case, Load C is executed after necessary Load A and B.
-                # Wait for Load C is already done here in PGR=2 case.
-                needLoadC = kernel["StoreCInUnroll"] and (not kernel["AtomicAddC"]) and kernel["ProblemType"]["UseBeta"]
-                if not (kernel["PrefetchGlobalRead"]==2 and needLoadC):
-                  retStr = self.getWaitcntCodeForDirectToVgpr(kernel, localWriteEndIter, u, firstIter, beforeBarrier=True)
-                  waitLWCode.addCode(retStr)
+                retStr = self.getWaitcntCodeForDirectToVgpr(kernel, localWriteEndIter, u, firstIter, beforeBarrier=True)
+                waitLWCode.addCode(retStr)
             # skip local write wait if DirectToVgpr + DirectToLds is enabled
             # (no local write code. Global read wait for DirectToLds is already done)
             if not kernel["NoLdsWriteCode"]:
@@ -2476,9 +2349,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         kl.append(self.comment3("Unrolled Loop - End %u/%u (final)"%(lc+1, loopCopies)))
 
         # add wait for global read here canOptimizePreLoopLWVmcnt is true and DirectToVgpr is true
-        # StoreCInUnroll does not require this wait because wait code is generated at the top of inner loop
-        if kernel["PrefetchGlobalRead"] and self.canOptimizePreLoopLWVmcnt and (kernel["DirectToVgprA"] or kernel["DirectToVgprB"]) \
-          and (not kernel["StoreCInUnroll"]):
+        if kernel["PrefetchGlobalRead"] and self.canOptimizePreLoopLWVmcnt and (kernel["DirectToVgprA"] or kernel["DirectToVgprB"]):
           retStr = self.getWaitcntCodeForDirectToVgpr(kernel, localWriteEndIter, u=0, firstIter=False)
           kl.append(retStr)
 
@@ -2559,14 +2430,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if kernel["PrefetchGlobalRead"]:
       if self.doShadowInit:
         kl.append(self.openShadowInit(kernel))
-        # init code for StoreCInUnroll per each persistent kernel loop iteration
-        # before generate new srdC/D (in globalWriteWorkGroupInit())
-        if self.storeCInUnroll:
-          kl.append(self.initStoreCInUnrollPerPersistentLoop(kernel))
         kl.append(self.globalWriteWorkGroupInit(kernel))
-        # after genarating new SrdC,D, swap with backup values so that previous srdC,D is used in unroll loop for StoreCInUnroll
-        if self.storeCInUnroll:
-          kl.append(self.swapSrdCDandBackup(kernel))
         if self.doShadowInit == 2:
           kl.append(self.initC(kernel)) # initC while waiting for global reads
         kl.append(self.closeShadowInit(kernel))
@@ -2660,9 +2524,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # open unrolled summation loop
     kl.append(self.comment3("Unrolled Loop(s) - Begin"))
-    # In StoreCInUnroll case, LoopCounter check code is already generated. We need only LoopBeginLabel
-    beginLabelOnly = kernel["StoreCInUnroll"]
-    kl.append(self.openLoop(kernel, self.unrollIdx, beginLabelOnly=beginLabelOnly))
+    kl.append(self.openLoop(kernel, self.unrollIdx, beginLabelOnly=False))
 
     lcStart = 0
     if self.useInitAccVgprOpt:
@@ -2698,14 +2560,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         kl.append(self.localReadSwapOffsets(kernel, expand, tensorParametersB))
 
     if kernel["PrefetchGlobalRead"] == 2:
-      # re-generate store code for StoreCInUnroll (odd=0,isLast=False))
-      self.generateStoreCCodeInUnrollLoop(kernel, 0, isLast=False)
       kl += self.noLoadLoop(kernel, tensorParametersA, tensorParametersB, isOptNLL=False, isNGLL=True, pack=pack)
-
-    # re-generate store code for StoreCInUnroll (no increment code (isLast=True))
-    # this should be after NGLL code for PGR=2
-    odd = 1
-    self.generateStoreCCodeInUnrollLoop(kernel, odd, isLast=True)
 
     # This "NoLoad" loop is a copy of the unroll loop but with global loads + LDS writes removed
     # doShadowInit is required since this pushes up the store SRD initialization before the NLL
@@ -2730,14 +2585,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
           self.saveLocalPointers(kernel)
           # deepCopy packCode for OptNLL noLoadLoop
           deepCopyPack = copy.deepcopy(pack)
-          # keep StoreCInUnroll related code for the next noLoadLoop
-          if kernel["StoreCInUnroll"]:
-            self.backupStoreCInUnrollRelatedCode()
           kl += self.noLoadLoop(kernel, tensorParametersA, tensorParametersB, isOptNLL=True, isNGLL=False, pack=deepCopyPack)
           self.restoreLocalPointers(kernel)
-          # restore StoreCInUnroll related code
-          if kernel["StoreCInUnroll"]:
-            self.restoreStoreCInUnrollRelatedCode()
 
         # skip second NLL code if enableSingleNLLOpt
         if not (self.enableSingleNLLOpt and firstNLLgenerated):
@@ -2745,10 +2594,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
         else:
           # generate PrefetchGlobalLastIterEnd label
           kl.append(self.closeSumAtLeastUnroll(kernel, prefetch=False, isOptNLL=False, isNGLL=False))
-
-        if kernel["StoreCInUnroll"]:
-          # end process for StoreCInUnroll per PersistentLoop (NoOptNLL)
-          kl.append(self.endProcessPersistentLoopforStoreCInUnrollNoOptNLL(kernel))
 
       # if PGR, last few iterations will have PLR,
       # and those PLR will not be used(register not checkIn) if without NoLoadLoop
@@ -3124,8 +2969,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.scheduleIterAlg = kernel["ScheduleIterAlg"]
     else:
       self.scheduleIterAlg = 0
-
-    self.storeCInUnroll = kernel["StoreCInUnroll"]
 
     self.noTailLoop = kernel["NoTailLoop"]
 
@@ -3556,8 +3399,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # condition(s) to enable init accvgpr opt (initialize only the last set of accvgpr instead of whole accvgpr)
     self.useInitAccVgprOpt = False
     # enable for the following conditions
-    if kernel["StoreCInUnroll"]:
-      self.useInitAccVgprOpt = True
     if (kernel["DirectToVgprA"] or kernel["DirectToVgprB"]):
       self.useInitAccVgprOpt = True
     # force to disable for the following conditions
@@ -3580,8 +3421,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # condition(s) to enable singleNLL opt
     self.enableSingleNLLOpt = False
     if self.noTailLoop:
-      if kernel["StoreCInUnroll"]:
-        self.enableSingleNLLOpt = True
+      pass
       # so far, not enabled for DirectToVgpr
       # Performance is better with Tensile, but does not perform better with HPL
       #if kernel["DirectToVgprA"] or kernel["DirectToVgprB"]:
@@ -4199,111 +4039,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
     return ""
 
   ##############################################################################
-  # init for StoreCInUnroll
-  ##############################################################################
-  @abc.abstractmethod
-  def initStoreCInUnroll(self, kernel):
-    return ""
-
-  ##############################################################################
-  # init for StoreCInUnroll per Persistent Loop
-  ##############################################################################
-  @abc.abstractmethod
-  def initStoreCInUnrollPerPersistentLoop(self, kernel):
-    return ""
-
-  ##############################################################################
-  # init for StoreCInUnroll per Unroll Loop
-  ##############################################################################
-  @abc.abstractmethod
-  def initStoreCInUnrollPerUnrollLoop(self, kernel, needInit):
-    return ""
-
-  ##############################################################################
-  # swap SrdC and SrdCbackup, SrdD and SrdDbackup
-  ##############################################################################
-  @abc.abstractmethod
-  def swapSrdCDandBackup(self, kernel):
-    return ""
-
-  ##############################################################################
-  # C/D address increment value for StoreCInUnroll
-  ##############################################################################
-  @abc.abstractmethod
-  def generateCorDaddrIncrementForStoreCInUnroll(self, kernel, CorD, odd, tmpSgprWork):
-    return ""
-
-  ##############################################################################
-  # get address/gpr index increment frequency for StoreCInUnroll
-  ##############################################################################
-  @abc.abstractmethod
-  def getAddrGprIdxIncrementFrequencyForStoreCInUnroll(self, kernel):
-    return ""
-
-  ##############################################################################
-  # generate post process for StoreCInUnroll loop
-  ##############################################################################
-  @abc.abstractmethod
-  def generatePostProcessForStoreCInUnrollLoop(self, kernel, needPost):
-    return ""
-
-  ##############################################################################
-  # restore SrdCbackup and SrdDbackup
-  ##############################################################################
-  @abc.abstractmethod
-  def restoreSrdCandDBackup(self, kernel):
-    return ""
-
-  ##############################################################################
-  # reset storeC sync objects
-  ##############################################################################
-  @abc.abstractmethod
-  def resetStoreCsyncObject(self, kernel):
-    return ""
-
-  ##############################################################################
-  # set storeC sync objects
-  ##############################################################################
-  @abc.abstractmethod
-  def setStoreCsyncObject(self, kernel):
-    return ""
-
-  ##############################################################################
-  # end process for StoreCInUnroll per PersistentLoop (OptNLL)
-  ##############################################################################
-  @abc.abstractmethod
-  def endProcessPersistentLoopforStoreCInUnrollOptNLL(self, kernel):
-    return ""
-
-  ##############################################################################
-  # end process for StoreCInUnroll per PersistentLoop (NoOptNLL)
-  ##############################################################################
-  @abc.abstractmethod
-  def endProcessPersistentLoopforStoreCInUnrollNoOptNLL(self, kernel):
-    return ""
-
-  ##############################################################################
-  # number of storeC code in template for StoreCInUnroll
-  ##############################################################################
-  @abc.abstractmethod
-  def getNumberOfStoreCInTemplate(self, kernel):
-    return ""
-
-  ##############################################################################
-  # number of LoadC code in template for StoreCInUnroll
-  ##############################################################################
-  @abc.abstractmethod
-  def getNumberOfLoadCInForLoadC(self, kernel):
-    return ""
-
-  ##############################################################################
-  # generate storeCInUnroll post loop code
-  ##############################################################################
-  @abc.abstractmethod
-  def generateStoreInUnrollPostLoop(self, kernel, isOptNLL, isDTVodd):
-    return ""
-
-  ##############################################################################
   # openOddNoLoadLoopForDTV
   # generate open code for DirectToVgpr + odd exit case in noLoadLoop code
   ##############################################################################
@@ -4395,28 +4130,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
   @abc.abstractmethod
   def MapAcctoArchRegs(self, kernel, option):
     return ""
-
-  ##############################################################################
-  # openmovaccVgpr
-  ##############################################################################
-  @abc.abstractmethod
-  def openmovaccVgpr(self, kernel, backupSgpr):
-    return ""
-
-  ##############################################################################
-  # getAccVgprCode
-  ##############################################################################
-  @abc.abstractmethod
-  def getAccVgprCode(self,kernel,odd):
-    return ""
-
-  ##############################################################################
-  # closemovaccVgpr
-  ##############################################################################
-  @abc.abstractmethod
-  def closemovaccVgpr(self, kernel, backupSgpr):
-    return ""
-
 
   ##############################################################################
   #
@@ -4757,228 +4470,5 @@ for codeObjectFileName in codeObjectFileNames:
         # oddLast case, ignore all of above and set 0
         if oddLast:
           needToWait = 0
-        if kernel["StoreCInUnroll"]:
-          # In StoreCInUnroll case,
-          # 1) last iteration case (u == localWriteEndIter + 1)
-          #  1-1) if StoreC is already executed in the previous u, add number of executed buffer_store/atomic_add
-          #      (global read C wait is already done in this case)
-          #  1-2) else, add number of global read C to numGlobalReadAll
-
-          # count number of StoreC in template
-          tmpStr = ' '.join([str(x) for x in self.StoreCUnrollCode.flatitems()])
-          numGlobalStoreCinTemplate  = tmpStr.count("_buffer_store")  # count _buffer_store
-          numGlobalStoreCinTemplate += tmpStr.count("buffer_atomic_add")   # count buffer_atomic_add
-          numGlobalStoreC = 0
-
-          if u == localWriteEndIter + 1:
-            if beforeBarrier:
-              # before barrier case (DirectToLds+DirectToVgpr), put waitcnt vmcnt just before barrier (before ds_read)
-              # In that case, StoreC is already done. Add number of store C from template to vmcnt.
-              numGlobalStoreC += numGlobalStoreCinTemplate
-              # It means LoadC wait is already done. Deduct the number of load C in template
-              # count number of Load in template
-              tmpStr = ' '.join([str(x) for x in self.LoadCUnrollCode.flatitems()])
-              numGlobalLoadCinTemplate  = tmpStr.count("_buffer_load")  # count _buffer_load
-              needToWait -= numGlobalLoadCinTemplate
-            else:
-              # check if store C is already in perIterLocalWriteCode
-              for i in range(u):
-                # scheduled storeC in unroll is in LocalWriteCode
-                localWriteStr = ' '.join([str(x) for x in self.perIterLocalWriteCode[i].flatitems()])
-                numGlobalStoreC += localWriteStr.count("_buffer_store")
-                numGlobalStoreC += localWriteStr.count("buffer_atomic_add")
-              # no LDS write (DirectToLds+DirectToVgpr) and not beforeBarrier and not firstIter case,
-              # no need to wait for StoreC in previous iteration
-              # Then, add the number of storeC in template
-              #if kernel["NoLdsWriteCode"] and not firstIter:
-              #  numGlobalStoreC += numGlobalStoreCinTemplate
-          # 2) add number of store C from previous iter to needToWait
-          #   2-1) not firstIter and u < localWriteEndIter + 1 case
-          #   2-2) noLoadC and last NoLoadLoop
-          needLoadC = (not kernel["AtomicAddC"]) and kernel["ProblemType"]["UseBeta"]
-          if not firstIter and (u < localWriteEndIter + 1 or ((not needLoadC) and NLLlast)):
-            numGlobalStoreC += numGlobalStoreCinTemplate
-
-          # oddLast case, ignore all of above and set numGlobalStoreCinTemplate
-          if oddLast:
-            numGlobalStoreC = numGlobalStoreCinTemplate
-
-          # add numGlobalStoreC to needToWait
-          needToWait += numGlobalStoreC
-          waitComment = "global read/store wait for DirectToVgpr with StoreCInUnroll (StoreC=%u)"%(numGlobalStoreC)
         retStr = "s_waitcnt vmcnt(%u) // %s\n"%(needToWait, waitComment)
     return retStr
-
-  ##############################################################################
-  # Backup StoreCInUnroll related code
-  ##############################################################################
-  def backupStoreCInUnrollRelatedCode(self):
-    # keep StoreCInUnrollPreCode, StoreCUnrollPostCode for the next noLoadLoop
-    self.StoreCUnrollPreCodeBackup = copy.deepcopy(self.StoreCUnrollPreCode)
-    self.StoreCUnrollPostCodeBackup = copy.deepcopy(self.StoreCUnrollPostCode)
-
-  ##############################################################################
-  # Restore StoreCInUnroll related code
-  ##############################################################################
-  def restoreStoreCInUnrollRelatedCode(self):
-    self.StoreCUnrollPreCode = self.StoreCUnrollPreCodeBackup
-    self.StoreCUnrollPostCode = self.StoreCUnrollPostCodeBackup
-    self.StoreCUnrollLoopCodeStarted = 0
-
-  ##############################################################################
-  # generate storeC code in UnrollLoop
-  ##############################################################################
-  def generateStoreCCodeInUnrollLoop(self, kernel, odd, isLast=False):
-    self.LoadCUnrollCode = Code.Module()
-    self.StoreCUnrollCode = Code.Module()
-    self.StoreCUnrollPreCode = Code.Module()
-    self.StoreCUnrollPostCode = Code.Module()
-    self.numItemsBeforeStoreC = 0
-    self.StoreCUnrollStartComment ="Start of StoreCInUnroll code"
-    self.StoreCUnrollStoreStartComment ="Start of StoreCInUnroll Store code"
-    self.StoreCUnrollLoopCodeStarted = 0  # 0:not StoreC code started, 1: started
-    if kernel["StoreCInUnroll"]:
-      needInit = not odd
-      needPost = odd
-      needInc  = (not isLast) or kernel["StoreCInUnrollPostLoop"]
-      backupSgpr = self.getTmpSgpr(2).idx()  # allocate all tmp register here
-      tmpSgprWork = backupSgpr + 1
-      needAddrC = (not kernel["AssertCEqualsD"]) and kernel["ProblemType"]["UseBeta"]
-
-      # init/inc code is necessary if inc frequency is 1
-      needInit = needInit or (self.getAddrGprIdxIncrementFrequencyForStoreCInUnroll(kernel) == 1)
-      needPost = needPost or (self.getAddrGprIdxIncrementFrequencyForStoreCInUnroll(kernel) == 1)
-
-      # generate init code for StoreCInUnroll per Unroll Loop
-      initPerUnrollCode = self.initStoreCInUnrollPerUnrollLoop(kernel, needInit)
-
-      # loadC
-      for x in self.LoadCTemplate.items():
-        # Load C case, insert Init per unroll code before Load C (setup vgpr offset for loadC and StoreC)
-        s = initPerUnrollCode + str(x)
-        initPerUnrollCode = "" # reset initPerUnrollCode so that it is not inserted again
-        self.LoadCUnrollCode.addText(s)
-      # Addr C increment code (no increment for isLast (and not PostLoop))
-      if needInc and needAddrC:
-        oddParam = needPost
-        kStr = self.generateCorDaddrIncrementForStoreCInUnroll(kernel, "C", oddParam, tmpSgprWork)
-        self.LoadCUnrollCode.addText(kStr)
-
-      if initPerUnrollCode != "":
-        # If init code is not inserted (no Load C case), insert it to the top of StoreC list (setup vgpr offset for StoreC)
-        self.StoreCUnrollPreCode.addText(initPerUnrollCode)
-        initPerUnrollCode = "" # reset initPerUnrollCode so that it is not inserted again
-
-      # these 3 items need to be in the same set
-      #  open gpr indexing
-      #  accVgpr (need gpr indexing)
-      #  close gpr indexing
-      kStr = self.openmovaccVgpr(kernel, backupSgpr)
-      # odd case, use + (1 iteration) for gpr index, but not necessary if index frequency is 1
-      oddGprIndex = odd and (self.getAddrGprIdxIncrementFrequencyForStoreCInUnroll(kernel) > 1)
-      kStr += self.getAccVgprCode(kernel, oddGprIndex)
-      first, second = self.closemovaccVgpr(kernel, backupSgpr)
-      kStr += first
-      self.StoreCUnrollPreCode.addText(kStr)
-      # put second part of close gpr indexing separately (for better scheduling)
-      self.StoreCUnrollPreCode.addText(second)
-      # Alpha
-      kStr = ""
-      for x in self.AlphaOpTemplate.items():
-        kStr += str(x)
-
-      if kStr != "":
-        self.StoreCUnrollPreCode.addText(kStr)
-
-      # count the number of items before StoreC (before beta)
-      self.numItemsBeforeStoreC = len(list(self.StoreCUnrollPreCode.items()))
-
-      # StoreC
-
-      # put marker comment to recognize start point of StoreC code
-      # this must be the first item in self.StoreCUnrollCode.
-      self.StoreCUnrollCode.addComment0(self.StoreCUnrollStartComment)
-      # add necessary dummy based on number of mfma instructions between local write items
-      # put enough interval (=3) for LocalWritePerMfma == -1 case
-      numMfma = 3 if kernel["LocalWritePerMfma"] == -1 else roundUp(1/kernel["LocalWritePerMfma"])
-      n = self.numItemsBeforeStoreC - numMfma # first numMfma items are inserted at the start comment and following mfmas
-      while n >= numMfma:
-        self.StoreCUnrollCode.addText("")
-        n -= numMfma
-
-      # insert items in postProcessList between StoreC/AtomicAdd (StoreVectorWidth=1 only)
-      imod = Code.Module()
-      imod.addComment0(self.StoreCUnrollStoreStartComment)
-      StartComment = str(imod)
-
-      # Beta
-      kStrBeta = ""
-      for x in self.BetaOpTemplate.items():
-        kStrBeta += str(x)
-      # double complex case, put beta instruction separately
-      if kStrBeta != "" and kernel["ProblemType"]["DestDataType"].isDoubleComplex():
-        # combine beta code with first StoreC comment to avoid generating beta before alpha
-        self.StoreCUnrollCode.addText(kStrBeta + StartComment)
-        kStrBeta = ""
-        StartComment = ""
-
-      # number of instructions(items) of increment code between MFMAs
-      putCount =  1
-      postProcessListIndex = 0
-      # generate post process for StoreCInUnroll loop
-      # 1) increment gpr indexing (new value in tmp). Put this as separate item in StoreCUnrollCode
-      # 2-1) increment StoreC address  (new value in tmp)
-      # 2-2) check enable count and apply new values when necessary
-      postProcessList = []
-      finalAddrIncList = []
-      if needInc:
-        postProcessList, finalAddrIncList = self.generatePostProcessForStoreCInUnrollLoop(kernel, needPost)
-
-      for x in self.StoreCTemplate.items():
-        kStr = ""
-        if x == self.StoreCTemplate.items()[0]:
-          kStr += kStrBeta + StartComment # combine beta code with first StoreC. first item case, add marker comment
-          StartComment = ""
-        strX = str(x)
-        kStr += strX
-        if x != self.StoreCTemplate.items()[-1]:
-          # not the last StoreC
-          # add postprocess code or empty between StoreC
-          self.StoreCUnrollCode.addCode(kStr)
-          end = kernel["StoreCInUnrollInterval"] - 1
-          for i in range(end):
-            if postProcessListIndex < len(postProcessList):
-              self.StoreCUnrollCode.addText(postProcessList[postProcessListIndex])
-              postProcessListIndex += 1
-            else:
-              self.StoreCUnrollCode.addText("") # add empty str to add interval between Store codes
-        else:
-          # last StoreC
-          if not (kernel["StoreCInUnrollPostLoop"] and isLast):
-            # last element and not StoreCInUnrollPostLoop+isLast case
-            self.StoreCUnrollCode.addCode(kStr)
-            # add remaining postprocess, finalAddrInc code in StoreCUnrollPostCode
-            count = 0
-            kStr = ""
-            for i in range(postProcessListIndex, len(postProcessList)):
-              kStr += postProcessList[i]
-              count+=1
-              if count == putCount:
-                self.StoreCUnrollPostCode.addText(kStr)
-                count = 0
-                kStr = ""
-            for i in range(len(finalAddrIncList)):
-              kStr += finalAddrIncList[i]
-              count+=1
-              if count == putCount:
-                self.StoreCUnrollPostCode.addText(kStr)
-                count = 0
-                kStr = ""
-            if count > 0:
-              self.StoreCUnrollPostCode.addText(kStr)
-          else:
-            # not last element or StoreCInUnrollPostLoop+isLast
-            # add all remaining items in postProcessList and finalAddrInc code after the last StoreC (in the same item)
-            for item in (postProcessList[postProcessListIndex:] + finalAddrIncList):
-              kStr += item
-            self.StoreCUnrollCode.addCode(kStr)

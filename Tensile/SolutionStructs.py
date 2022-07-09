@@ -2811,63 +2811,6 @@ class Solution(collections.abc.Mapping):
       reject(state, "InnerUnroll only supported on assembly")
     state["LoopUnroll"] //= state["InnerUnroll"]
 
-    #constraints for StoreCInUnroll feature
-    if state["StoreCInUnroll"]:
-      if not (state["ProblemType"]["DataType"].isDouble() or state["ProblemType"]["DataType"].isDoubleComplex()):
-        reject(state, "StoreCInUnroll currently only available for dgemm/zgemm")
-        return
-      if state["MIArchVgpr"]:
-        reject(state, "MIArchVgpr is not supported for StoreCinUnroll")
-        return
-      if not state["PersistentKernel"]:
-        reject(state, "StoreCInUnroll requires PersistentKernel feature")
-        return
-      if state["ProblemType"]["DataType"].isDouble() and state["VectorWidth"] != 2:
-        reject(state, "StoreCInUnroll requires VectorWidth=2 for dgemm")
-        return
-      if state["AtomicAddC"] and state["StoreVectorWidth"] != 1:
-        reject(state, "StoreCInUnroll requires AtomicAddC with StoreVectorWidth=1")
-        return
-      if state["ScheduleGlobalRead"] != 1:
-        reject(state, "StoreCInUnroll requires ScheduleGlobalRead=1")
-        return
-      if state["PrefetchGlobalRead"] == 0:
-        reject(state, "StoreCInUnroll requires PrefetchGlobalRead!=0")
-        return
-      if not state["ExpandPointerSwap"]:
-        reject(state, "StoreCInUnroll requires ExpandPointerSwap")
-        return
-      if state["ScheduleIterAlg"] != 3:
-        reject(state, "StoreCInUnroll requires ScheduleIterAlg=3")
-        return
-      if state['MIWaveGroup'][1] != 1 and state['MIWaveGroup'][1] != 4:
-        reject(state, "StoreCInUnroll requires [MIWaveGroup][1]=1 or 4")
-        return
-      if state["StoreCInUnrollExact"] and state["StoreCInUnrollPostLoop"] :
-        reject(state, "StoreCInUnrollPostLoop does not work with StoreCInUnrollExact")
-        return
-      if not state["SourceSwap"]:
-        reject(state, "StoreCInUnroll requires SourceSwap feature")
-        return
-      if state["ProblemType"]["DataType"].isDouble() and state["NumElementsPerBatchStore"] == 1:
-        reject(state, "StoreCInUnroll does not work with NumElementsPerBatchStore = 1 for dgemm")
-        return
-      # minimum K check
-      # PGR=2 requires minimum K
-      if state["PrefetchGlobalRead"] == 2:
-        # PGR=2 case, K > DepthU * 2 is necessary
-        minDUnum = 2
-        if not (3 in state["AssertSizeGreaterThan"].keys() and state["AssertSizeGreaterThan"][3] >= state["DepthU"] * minDUnum):
-          reject(state, "StoreCInUnroll does not work if AssertSizeGreaterThan for K is not greater than DepthU * %u"%minDUnum)
-          return
-
-    else:
-      # force to disable if StoreCInUnroll related parameter is enabled
-      if state["StoreCInUnrollPostLoop"] :
-        state["StoreCInUnrollPostLoop"] = False
-      if state["StoreCInUnrollExact"] :
-        state["StoreCInUnrollExact"] = False
-
     # check LocalDotLayout
     ldl = state["LocalDotLayout"]
     if ldl> 1:

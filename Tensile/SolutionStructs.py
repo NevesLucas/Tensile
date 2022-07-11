@@ -1892,10 +1892,6 @@ class Solution(collections.abc.Mapping):
       if state["DepthULdsDivisor"] > 1:
         state["ExpandPointerSwap"] = 0
 
-    # Can optimize preLoop LW Vmcnt only when PAP, BufferLoad
-    # TODO- less restriction? Haven't tested for not BufferLoad
-    state["OptPreLoopVmcnt"] = state["OptPreLoopVmcnt"] and False and bufferLoad
-
     #print("PackedC0IdxChars", state["PackedC0IdxChars"])
     #print("PackedC1IdxChars", state["PackedC1IdxChars"])
 

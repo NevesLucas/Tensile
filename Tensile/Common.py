@@ -502,12 +502,6 @@ validParameters = {
     # followed by local writes, followed by MACs
     "ScheduleIterAlg":            [0, 1, 2, 3],
 
-    # Optimizing Local Write Vmcnt in PreLoop when PGR is on, especially for PAP
-    # 0: no optimization, force wait vmcnt 0
-    # 1: do optimization, in PAP, this can avoid ds_write waiting for previous global store
-    # Can always be True, set to False for debugging or comparison
-    "OptPreLoopVmcnt":            [False, True],
-
     # For MatrixInstruction and SIA3, number of GlobalReadInstruction between mfma
     # the purpose of this parameter is to control density of global read instruction scheduling
     # Scheduling global read back to back can have better memory efficiency
@@ -1153,7 +1147,6 @@ defaultBenchmarkCommonParameters = [
     {"ScheduleGlobalRead":        [ 1 ] },
     {"ScheduleLocalWrite":        [ 1 ] },
     {"ScheduleIterAlg":           [ 1 ] },
-    {"OptPreLoopVmcnt":           [ True ] },
 
     {"GlobalReadPerMfma":         [ 1 ] },
     {"LocalWritePerMfma":         [ -1 ] },

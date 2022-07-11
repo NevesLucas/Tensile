@@ -2240,15 +2240,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if kernel["DirectToVgprA"] or kernel["DirectToVgprB"]:
           if self.enable["Wait"]:
             # not generate wait here
-            #  1) for the first unroll with self.canOptimizePreLoopLWVmcnt = True
-            #  2) local write code in previous u (u-1) has waitcnt vmcnt
+            #  1) local write code in previous u (u-1) has waitcnt vmcnt
             prevVmcnt = False
             prevLocalWrite = ""
             if (u > 0):
               for up in range(u):
                 prevLocalWrite += ' '.join([str(x) for x in self.perIterLocalWriteCode[up].flatitems()])
               prevVmcnt = "vmcnt" in prevLocalWrite
-            if not (firstIter and u == 0 and self.canOptimizePreLoopLWVmcnt) and not prevVmcnt:
+            if not prevVmcnt:
               retStr = self.getWaitcntCodeForDirectToVgpr(kernel, localWriteEndIter, u, firstIter)
               kl.append(retStr)
         # put barrier at localWriteEndIter+1
@@ -2348,11 +2347,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       else:
         kl.append(self.comment3("Unrolled Loop - End %u/%u (final)"%(lc+1, loopCopies)))
 
-        # add wait for global read here canOptimizePreLoopLWVmcnt is true and DirectToVgpr is true
-        if kernel["PrefetchGlobalRead"] and self.canOptimizePreLoopLWVmcnt and (kernel["DirectToVgprA"] or kernel["DirectToVgprB"]):
-          retStr = self.getWaitcntCodeForDirectToVgpr(kernel, localWriteEndIter, u=0, firstIter=False)
-          kl.append(retStr)
-
     else:
       kl.append(self.comment3("Unrolled Loop - End"))
 
@@ -2435,7 +2429,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           kl.append(self.initC(kernel)) # initC while waiting for global reads
         kl.append(self.closeShadowInit(kernel))
 
-      if self.enable["Wait"] and not self.canOptimizePreLoopLWVmcnt:
+      if self.enable["Wait"]:
         kl.append(self.wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1, "8wait for global read"))
         # These cases loop back and run the prefetch loop again
         # we need an extra barrier to ensure that the ds_reads (either for SR or MFMA) from previous iteration
@@ -2862,10 +2856,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
         kl.append(self.comment("not-LocalSplitU: global write"))
         kl.append(self.notLocalSplitUGlobalWrite(kernel))
 
-    # After we know the #-of-globalwrite instructions, we can go back to replace the pre-loop LW vmcnt
-    if self.preLoopLocalWriteCode != None:
-      self.replacePreLoopLWVmcnt(kernel)
-
     # function suffix
     kl.append(self.functionEnd(kernel, True))
     kl.append(self.functionSuffix(kernel))
@@ -2982,7 +2972,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # for pack summation dims, but can also be used independently and this is useful for isolation and testing.
     self.unrollIncIsDepthU = kernel["UnrollIncIsDepthU"]
 
-    self.canOptimizePreLoopLWVmcnt = kernel["OptPreLoopVmcnt"]
 
     self.enable = {}
     dkp = kernel["DisableKernelPieces"]
@@ -3909,13 +3898,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   @abc.abstractmethod
   def preLoopLocalWriteDo(self, kernel, tPA, tPB):
-    return ""
-
-  ##############################################################################
-  # Replace the determined vmcnt in PreLoop LocalWrite
-  ##############################################################################
-  @abc.abstractmethod
-  def replacePreLoopLWVmcnt(self, kernel):
     return ""
 
   ##############################################################################
